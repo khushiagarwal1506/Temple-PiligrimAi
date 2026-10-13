@@ -14,6 +14,7 @@ router = APIRouter(tags=["Chat"])
 class ChatRequest(BaseModel):
     question: str = Field(..., description="User query about temple details", json_schema_extra={"example": "What are the timings of Basara Temple?"})
     session_id: Optional[str] = Field(default=None, description="Optional conversation session identifier for multi-turn context")
+    client_message_id: Optional[str] = Field(default=None, description="Unique client-generated message identifier for idempotency")
 
 class ChatResponse(BaseModel):
     question: str
@@ -25,6 +26,8 @@ class ChatResponse(BaseModel):
     session_id: Optional[str] = None
     latency_ms: Optional[float] = None
     metadata: Optional[Dict[str, Any]] = None
+    message_id: Optional[str] = None
+    client_message_id: Optional[str] = None
 
 _service_instance: Optional[Any] = None
 _coordinator_instance: Optional[Any] = None
@@ -76,7 +79,7 @@ def get_coordinator() -> Any:
             itinerary = ItineraryPlanningAgent()
             weather = LiveWeatherAgent()
             budget = BudgetAgent()
-            navigation = LiveNavigationAgent()
+            navigation = LiveNavigationAgent(memory_manager=memory_manager)
             voice_multilingual = VoiceMultilingualAgent(translation_provider=LocalTranslationProvider())
             emergency = EmergencyAgent()
             recommendation = RecommendationAgent(weather_agent=weather)
@@ -110,6 +113,13 @@ def set_coordinator(coordinator: Optional[Any]) -> None:
     _coordinator_instance = coordinator
 
 from app.auth.jwt import get_optional_current_user
+from app.db.chat_history import (
+    save_user_message,
+    save_assistant_message,
+    get_existing_assistant_reply,
+    claim_user_message_turn,
+    wait_for_assistant_reply
+)
 
 @router.post("/chat", response_model=ChatResponse)
 async def chat_endpoint(
@@ -120,6 +130,7 @@ async def chat_endpoint(
     POST /chat endpoint to receive user questions and return AI answers
     routed through the MasterAgentCoordinator multi-agent architecture.
     Optionally associates authenticated user without modifying RAG or response contracts.
+    Supports client_message_id for idempotent retry prevention and stable deduplication.
     """
     cleaned_question = request.question.strip()
     if not cleaned_question:
@@ -131,8 +142,71 @@ async def chat_endpoint(
     user_info_str = f" [User: {current_user.get('email')}]" if current_user else " [Anonymous]"
     logger.info(f"[CHAT ENDPOINT]{user_info_str} Received question: {cleaned_question[:80]}")
 
-
     session_id = request.session_id.strip() if request.session_id and request.session_id.strip() else str(uuid.uuid4())
+    client_msg_id = request.client_message_id.strip() if request.client_message_id and request.client_message_id.strip() else None
+
+    # Idempotency and atomic claim check under true concurrency:
+    if current_user and client_msg_id:
+        existing_reply = get_existing_assistant_reply(
+            user_id=str(current_user["_id"]),
+            session_id=session_id,
+            client_message_id=client_msg_id
+        )
+        if existing_reply:
+            logger.info(f"[CHAT ENDPOINT] Returning cached idempotent reply for client_message_id={client_msg_id}")
+            return ChatResponse(
+                question=cleaned_question,
+                answer=existing_reply.get("content", ""),
+                retrieved_chunks=len(existing_reply.get("sources", [])),
+                sources=existing_reply.get("sources", []),
+                confidence_score=existing_reply.get("confidence_score") or 1.0,
+                agent_name=existing_reply.get("agent_name") or "coordinator",
+                session_id=session_id,
+                latency_ms=0.0,
+                metadata=existing_reply.get("metadata", {}),
+                message_id=str(existing_reply.get("_id")),
+                client_message_id=client_msg_id
+            )
+
+        # Atomic claim: Only the winning concurrent request executes coordinator
+        is_owner, _ = claim_user_message_turn(
+            user_id=str(current_user["_id"]),
+            session_id=session_id,
+            content=cleaned_question,
+            client_message_id=client_msg_id
+        )
+        if not is_owner:
+            logger.info(f"[CHAT ENDPOINT] Concurrent request in-flight for client_message_id={client_msg_id}; waiting for primary execution.")
+            reply_doc = wait_for_assistant_reply(
+                user_id=str(current_user["_id"]),
+                session_id=session_id,
+                client_message_id=client_msg_id,
+                timeout_seconds=30.0
+            )
+            if reply_doc:
+                return ChatResponse(
+                    question=cleaned_question,
+                    answer=reply_doc.get("content", ""),
+                    retrieved_chunks=len(reply_doc.get("sources", [])),
+                    sources=reply_doc.get("sources", []),
+                    confidence_score=reply_doc.get("confidence_score") or 1.0,
+                    agent_name=reply_doc.get("agent_name") or "coordinator",
+                    session_id=session_id,
+                    latency_ms=0.0,
+                    metadata=reply_doc.get("metadata", {}),
+                    message_id=str(reply_doc.get("_id")),
+                    client_message_id=client_msg_id
+                )
+    elif current_user:
+        try:
+            save_user_message(
+                user_id=str(current_user["_id"]),
+                session_id=session_id,
+                content=cleaned_question,
+                client_message_id=None
+            )
+        except Exception as e:
+            logger.warning(f"[CHAT HISTORY] Could not persist user message: {e}")
 
     coordinator = get_coordinator()
 
@@ -163,6 +237,30 @@ async def chat_endpoint(
             if hasattr(rd, "confidence") and rd.confidence is not None:
                 confidence_score = float(rd.confidence)
 
+        confidence_score = max(0.0, float(confidence_score))
+
+        logger.info(
+            f"[CHAT RESPONSE] session_id={session_id} agent={agent_resp.agent_name} "
+            f"constraints={agent_resp.metadata.get('structured_constraints')}"
+        )
+
+        # Save assistant response to persistent MongoDB chat history if authenticated
+        saved_msg_id = None
+        if current_user and agent_resp and agent_resp.answer:
+            try:
+                saved_msg_id = save_assistant_message(
+                    user_id=str(current_user["_id"]),
+                    session_id=session_id,
+                    content=agent_resp.answer,
+                    agent_name=agent_resp.agent_name,
+                    metadata=agent_resp.metadata,
+                    sources=agent_resp.sources,
+                    confidence_score=confidence_score,
+                    client_message_id=client_msg_id
+                )
+            except Exception as e:
+                logger.warning(f"[CHAT HISTORY] Could not persist assistant message: {e}")
+
         return ChatResponse(
             question=cleaned_question,
             answer=agent_resp.answer,
@@ -172,7 +270,9 @@ async def chat_endpoint(
             agent_name=agent_resp.agent_name or "coordinator",
             session_id=session_id,
             latency_ms=agent_resp.latency_ms,
-            metadata=agent_resp.metadata
+            metadata=agent_resp.metadata,
+            message_id=saved_msg_id,
+            client_message_id=client_msg_id
         )
     except HTTPException:
         raise

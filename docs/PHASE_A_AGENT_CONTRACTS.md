@@ -18,6 +18,7 @@ These foundational contracts decouple agent orchestration from specific data ret
 
 ## 2. Core Architecture & Components
 
+
 ### 2.1 `BaseAgent` (`backend/app/agents/base_agent.py`)
 - **Purpose:** Abstract base class that all future specialist agents (`TempleInformationAgent`, `ComparisonAgent`, `CrossTempleAggregationAgent`, `ItineraryPlanningAgent`, `CompleteListRetriever`) will inherit from.
 - **Contract:**

@@ -23,7 +23,83 @@ from app.agents.router import AgentRouter
 from app.agents.response_aggregator import ResponseAggregator
 from app.agents.temple_information_agent import TempleInformationAgent
 
+import re
+import ast
+import math
+
 logger = logging.getLogger(__name__)
+
+
+def evaluate_arithmetic_query(query: str) -> Optional[str]:
+    """
+    Evaluates ordinary arithmetic calculations (e.g. '₹5,000 − ₹1,750 = ₹3,250').
+    Safely parses numbers, currency symbols, and basic operators (+, -, *, /, −, –).
+    Returns formatted result string or None if not an arithmetic query.
+    """
+    q = query.strip()
+    m_pref = re.match(r"^(?:what\s+is\s+|calculate\s+|solve\s+|evaluate\s+)?(.+?)\s*(?:=\s*\??|\?)?$", q, re.IGNORECASE)
+    if not m_pref:
+        return None
+    expr_str = m_pref.group(1).strip()
+
+    has_rupee = ("₹" in q or bool(re.search(r"\b(?:rs\.?|inr|rupees?)\b", q, re.IGNORECASE)))
+
+    norm_expr = expr_str.replace("−", "-").replace("–", "-").replace("×", "*").replace("÷", "/")
+    norm_expr = re.sub(r"\bminus\b", "-", norm_expr, flags=re.IGNORECASE)
+    norm_expr = re.sub(r"\bplus\b", "+", norm_expr, flags=re.IGNORECASE)
+    norm_expr = re.sub(r"\btimes\b", "*", norm_expr, flags=re.IGNORECASE)
+    norm_expr = re.sub(r"\bdivided\s+by\b", "/", norm_expr, flags=re.IGNORECASE)
+
+    cleaned_expr = re.sub(r"[₹]|rs\.?|inr|rupees?", "", norm_expr, flags=re.IGNORECASE).strip()
+    cleaned_expr = cleaned_expr.replace(",", "")
+
+    if not re.match(r"^[\d\s+\-*/().]+$", cleaned_expr):
+        return None
+
+    if not re.search(r"[-+*/]", cleaned_expr):
+        return None
+
+    try:
+        node = ast.parse(cleaned_expr, mode='eval')
+        def _safe_eval(n):
+            if isinstance(n, ast.Expression):
+                return _safe_eval(n.body)
+            elif isinstance(n, ast.Constant) and isinstance(n.value, (int, float)):
+                return n.value
+            elif isinstance(n, ast.UnaryOp) and isinstance(n.op, (ast.UAdd, ast.USub)):
+                val = _safe_eval(n.operand)
+                return val if isinstance(n.op, ast.UAdd) else -val
+            elif isinstance(n, ast.BinOp):
+                left = _safe_eval(n.left)
+                right = _safe_eval(n.right)
+                if isinstance(n.op, ast.Add): return left + right
+                elif isinstance(n.op, ast.Sub): return left - right
+                elif isinstance(n.op, ast.Mult): return left * right
+                elif isinstance(n.op, ast.Div): return left / right if right != 0 else float('nan')
+            raise ValueError("Unsupported operation")
+
+        result = _safe_eval(node)
+        if math.isnan(result):
+            return "Undefined (division by zero)"
+
+        if isinstance(result, float) and result.is_integer():
+            res_str = f"{int(result):,}"
+        elif isinstance(result, float):
+            res_str = f"{result:,.2f}"
+        else:
+            res_str = f"{result:,}"
+
+        curr = "₹" if has_rupee else ""
+        orig_clean = q.rstrip("?").rstrip("=").strip()
+        if orig_clean.lower().startswith("what is "):
+            orig_clean = orig_clean[8:].strip()
+        elif orig_clean.lower().startswith("calculate "):
+            orig_clean = orig_clean[10:].strip()
+
+        return f"{orig_clean} = {curr}{res_str}"
+    except Exception:
+        return None
+
 
 
 class MasterAgentCoordinator:
@@ -90,12 +166,15 @@ class MasterAgentCoordinator:
         # Initialize sequential multi-intent pipeline
         if pipeline is not None:
             self.pipeline = pipeline
+            if self.memory_manager and not getattr(self.pipeline, "memory_manager", None):
+                self.pipeline.memory_manager = self.memory_manager
         else:
             from app.agents.multi_intent_pipeline import SequentialMultiIntentPipeline
             self.pipeline = SequentialMultiIntentPipeline(
                 router=self.router,
                 aggregator=self.aggregator,
-                agents=self.agents
+                agents=self.agents,
+                memory_manager=self.memory_manager
             )
 
     def register_agent(self, agent: BaseAgent) -> None:
@@ -149,6 +228,29 @@ class MasterAgentCoordinator:
         orig_query = query
 
         # -------------------------------------------------------------
+        # 1.05 Direct Arithmetic Calculation Handling (e.g. ₹5,000 − ₹1,750 = ₹3,250)
+        # -------------------------------------------------------------
+        arith_result = evaluate_arithmetic_query(query)
+        if arith_result:
+            arith_resp = AgentResponse(
+                success=True,
+                agent_name="coordinator",
+                answer=arith_result,
+                sources=[],
+                metadata={"intent": "arithmetic", "result": arith_result},
+                latency_ms=(time.perf_counter() - t0) * 1000.0
+            )
+            state.add_trace(
+                agent_name="coordinator",
+                step_name="arithmetic_calculation",
+                status="completed",
+                latency_ms=arith_resp.latency_ms
+            )
+            state.final_response = arith_resp
+            return arith_resp
+
+
+        # -------------------------------------------------------------
         # 1.1 Memory Context Resolution (Phase I)
         # -------------------------------------------------------------
         if self.memory_manager is not None and state.session_id:
@@ -182,16 +284,20 @@ class MasterAgentCoordinator:
                 state.intermediate_results["memory"] = {
                     "original_query": orig_query,
                     "resolved_query": resolved_query,
-                    "referenced_temple": resolution.get("referenced_temple")
+                    "referenced_temple": resolution.get("referenced_temple"),
+                    "resolved_from_pending": resolution.get("resolved_from_pending", False)
                 }
                 state.add_trace(
                     agent_name="coordinator",
                     step_name="memory_resolved",
                     status="completed",
                     metadata={
-                        "original_query": orig_query,
+                        "original_question": resolution.get("original_pending_question", orig_query),
+                        "follow_up": orig_query if resolution.get("resolved_from_pending") else None,
+                        "resolved_intent": "temple_information",
+                        "resolved_temple": resolution.get("referenced_temple"),
                         "resolved_query": resolved_query,
-                        "referenced_temple": resolution.get("referenced_temple")
+                        "resolved_from_pending": resolution.get("resolved_from_pending", False)
                     }
                 )
                 query = resolved_query
@@ -203,6 +309,29 @@ class MasterAgentCoordinator:
             if recent_turns:
                 state.intermediate_results["previous_turn_answer"] = recent_turns[-1].response_summary
                 state.intermediate_results["previous_turn_query"] = recent_turns[-1].user_query
+
+        # -------------------------------------------------------------
+        # 1.2 Request-Scoped Canonical Constraints Resolution
+        # -------------------------------------------------------------
+        existing_context = {}
+        if self.memory_manager and state.session_id:
+            existing_context = self.memory_manager.get_trip_context(state.session_id) or {}
+
+        detected_temples = self.router._detect_temples(query)
+        from app.agents.canonical_constraints import extract_canonical_constraints, validate_and_synchronize_response
+        canonical = extract_canonical_constraints(
+            query=query,
+            session_trip_context=existing_context,
+            detected_temples=detected_temples
+        )
+        state.structured_constraints = canonical.to_dict()
+
+        logger.info(
+            f"[COORDINATOR CONSTRAINTS] session_id={state.session_id} query='{orig_query[:80]}' "
+            f"budget={canonical.budget_limit} pax={canonical.pax} (adults={canonical.adults}, children={canonical.children}) "
+            f"days={canonical.duration_days} nights={canonical.nights} destinations={canonical.destinations} "
+            f"is_followup={canonical.is_followup} inherited={canonical.inherited_fields}"
+        )
 
         # -------------------------------------------------------------
         # 2. Query Routing
@@ -280,6 +409,16 @@ class MasterAgentCoordinator:
                 metadata={"intent": route_decision.intent}
             )
             state.final_response = clarification_resp
+            
+            # Record pending clarification in memory manager so subsequent entity response is resolved
+            if self.memory_manager is not None and state.session_id:
+                self.memory_manager.set_pending_clarification(
+                    session_id=state.session_id,
+                    pending_question=orig_query,
+                    pending_intent="temple_information",
+                    metadata=dict(route_decision.metadata)
+                )
+                self._record_memory(state.session_id, orig_query, query, clarification_resp)
             return clarification_resp
 
         # -------------------------------------------------------------
@@ -428,6 +567,8 @@ class MasterAgentCoordinator:
         total_latency_ms = (time.perf_counter() - t0) * 1000.0
         final_aggregated_response.metadata["coordinator_latency_ms"] = total_latency_ms
 
+        final_aggregated_response = validate_and_synchronize_response(canonical, final_aggregated_response)
+
         state.add_trace(
             agent_name="coordinator",
             step_name="complete",
@@ -462,5 +603,11 @@ class MasterAgentCoordinator:
                     response_summary=response.answer[:200] if response.answer else "",
                     metadata=dict(response.metadata)
                 )
+                sc = response.metadata.get("structured_constraints")
+                if sc and isinstance(sc, dict):
+                    if not sc.get("is_followup", False):
+                        self.memory_manager.replace_trip_context(session_id, sc)
+                    else:
+                        self.memory_manager.update_trip_context(session_id, sc)
             except Exception as e:
                 logger.warning(f"Failed to record turn in memory: {e}")

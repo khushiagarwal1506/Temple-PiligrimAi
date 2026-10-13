@@ -171,3 +171,108 @@ async def search_nearby_places(
             results=[],
             message="Places search request failed or timed out. Offline mode active."
         )
+
+
+class RouteCalculationRequest(BaseModel):
+    origin: str = Field(..., description="Starting city, landmark, or temple")
+    destination: str = Field(..., description="Destination shrine or landmark")
+    travel_mode: str = Field(default="driving", description="Travel mode e.g. driving, transit, two_wheeler, walking")
+    origin_coordinates: Optional[List[float]] = Field(default=None, description="Resolved origin [lat, lng]")
+    destination_coordinates: Optional[List[float]] = Field(default=None, description="Resolved destination [lat, lng]")
+
+
+class RouteCalculationResponse(BaseModel):
+    success: bool
+    origin: str
+    destination: str
+    origin_canonical: Optional[str] = None
+    destination_canonical: Optional[str] = None
+    travel_mode: str = "driving"
+    distance_km: Optional[float] = None
+    duration_minutes: Optional[float] = None
+    traffic_duration_minutes: Optional[float] = None
+    polyline: Optional[str] = None
+    origin_coordinates: Optional[List[float]] = None
+    destination_coordinates: Optional[List[float]] = None
+    error: Optional[str] = None
+    message: Optional[str] = None
+
+
+@router.post("/route", response_model=RouteCalculationResponse)
+async def calculate_route(request: RouteCalculationRequest):
+    """
+    Direct route calculation for the in-app Route Planner.
+    Calculates live road geometry via Google Maps Routes API v2
+    without submitting a chat message or polluting conversational session state.
+    """
+    from app.agents.live_navigation_agent import LiveNavigationAgent
+    from app.agents.base_agent import AgentState
+
+    orig = request.origin.strip()
+    dest = request.destination.strip()
+    mode = (request.travel_mode or "driving").strip().lower()
+
+    if not orig or not dest:
+        return RouteCalculationResponse(
+            success=False,
+            origin=orig,
+            destination=dest,
+            travel_mode=mode,
+            error="Both origin and destination are required to calculate a route.",
+            message="Please provide both a starting location and destination."
+        )
+
+    try:
+        agent = LiveNavigationAgent()
+        constraints = {}
+        if request.origin_coordinates and len(request.origin_coordinates) >= 2:
+            constraints["origin_coordinates"] = request.origin_coordinates
+        if request.destination_coordinates and len(request.destination_coordinates) >= 2:
+            constraints["destination_coordinates"] = request.destination_coordinates
+
+        state = AgentState(
+            user_query=f"{orig} to {dest} {mode}",
+            extracted_params={"origin": orig, "destination": dest, "travel_mode": mode},
+            structured_constraints=constraints
+        )
+        resp = agent.execute(state)
+        meta = resp.metadata or {}
+
+        if resp.success and meta.get("polyline"):
+            orig_coords = meta.get("origin_coordinates") or request.origin_coordinates
+            dest_coords = meta.get("destination_coordinates") or request.destination_coordinates
+            return RouteCalculationResponse(
+                success=True,
+                origin=meta.get("origin") or orig,
+                destination=meta.get("destination") or dest,
+                origin_canonical=meta.get("origin_canonical"),
+                destination_canonical=meta.get("destination_canonical"),
+                travel_mode=meta.get("travel_mode") or mode,
+                distance_km=meta.get("distance_km"),
+                duration_minutes=meta.get("duration_minutes"),
+                traffic_duration_minutes=meta.get("traffic_duration_minutes"),
+                polyline=meta.get("polyline"),
+                origin_coordinates=orig_coords,
+                destination_coordinates=dest_coords,
+                message=None
+            )
+        else:
+            err_text = resp.error or resp.answer or "Route calculation failed between these locations."
+            return RouteCalculationResponse(
+                success=False,
+                origin=orig,
+                destination=dest,
+                travel_mode=mode,
+                error=err_text,
+                message=resp.answer or err_text
+            )
+    except Exception as e:
+        logger.error(f"Error calculating direct route: {e}")
+        return RouteCalculationResponse(
+            success=False,
+            origin=orig,
+            destination=dest,
+            travel_mode=mode,
+            error=str(e),
+            message="Failed to calculate route between these locations."
+        )

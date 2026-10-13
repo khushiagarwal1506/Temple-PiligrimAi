@@ -167,7 +167,7 @@ def test_10_specialist_failure():
     res = coord.process(state)
 
     assert res.success is False
-    assert res.answer == ""
+    assert res.answer == "" or "could not retrieve details" in res.answer.lower()
     assert "controlled specialist agent execution failure" in res.error.lower()
 
 

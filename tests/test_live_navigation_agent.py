@@ -211,7 +211,7 @@ def test_08_extract_params_between_p1_and_p2(agent):
 
 
 def test_09_extract_travel_modes(agent):
-    """Verify extraction of walking, bicycling, transit, and driving modes."""
+    """Verify extraction of walking, bicycling, transit, two_wheeler, and driving modes."""
     p_walk = agent.extract_route_parameters("Route from Hyderabad to Yadadri by walk")
     assert p_walk["travel_mode"] == "walking"
 
@@ -223,6 +223,12 @@ def test_09_extract_travel_modes(agent):
 
     p_drive = agent.extract_route_parameters("Driving time from Hyderabad to Yadadri")
     assert p_drive["travel_mode"] == "driving"
+
+    p_two_wheeler = agent.extract_route_parameters("Route from Hyderabad to Yadadri by two-wheeler")
+    assert p_two_wheeler["travel_mode"] == "two_wheeler"
+
+    p_bike2 = agent.extract_route_parameters("Directions from Hyderabad to Yadadri on motorcycle")
+    assert p_bike2["travel_mode"] == "two_wheeler"
 
 
 def test_10_extract_missing_origin_clarification(agent):
@@ -315,13 +321,17 @@ def test_16_missing_optional_route_description(mock_transport):
 
 
 def test_17_duration_formatting_helper():
-    """Verify format_duration helper accurately formats minutes."""
+    """Verify format_duration helper accurately formats minutes (45 min -> 45 mins, 60 -> 1 hr, 90 -> 1 hr 30 mins, 120 -> 2 hrs, 270 -> 4 hrs 30 mins)."""
     assert format_duration(None) == "Not available"
-    assert format_duration(45.0) == "45 min"
+    assert format_duration("invalid") == "Not available"
+    assert format_duration(45.0) == "45 mins"
     assert format_duration(60.0) == "1 hr"
-    assert format_duration(95.4) == "1 hr 35 min"
-    assert format_duration(120.0) == "2 hr"
-    assert format_duration(150.0) == "2 hr 30 min"
+    assert format_duration(90.0) == "1 hr 30 mins"
+    assert format_duration(120.0) == "2 hrs"
+    assert format_duration(270.0) == "4 hrs 30 mins"
+    assert format_duration(1.0) == "1 min"
+    assert format_duration(61.0) == "1 hr 1 min"
+    assert format_duration(121.0) == "2 hrs 1 min"
 
 
 def test_18_empty_routes_list_returns_not_found(mock_transport):

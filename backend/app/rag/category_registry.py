@@ -192,7 +192,7 @@ class CategoryRegistry:
             display_name="Photo Gallery",
             candidate_files=["gallery.json"],
             patterns=[
-                r"\b(gallery|photos?|images?|pictures?|media)\b"
+                r"\b(gallery|photo\s*gallery|photos\s*gallery|image\s*gallery|pictures\s*gallery|media\s*gallery)\b"
             ],
             list_oriented=False,
             aggregation_supported=False,
@@ -267,13 +267,13 @@ class CategoryRegistry:
             display_name="Rules & Guidelines",
             candidate_files=["rules.json", "temple.json"],
             patterns=[
-                r"\b(rules?|dress\s*code|guidelines?|dos\s*and\s*don'?ts|photography\s*rules?|mobile\s*rules?|restrictions?|code\s*of\s*conduct|traditions?)\b"
+                r"\b(rules?|dress\s*code|guidelines?|dos\s*and\s*don'?ts|photography|photos?\s*(?:allowed|prohibited|ban|rules?|policy)|cameras?|mobiles?|mobile\s*phones?|phones?|electronics?|electronic\s*(?:ban|devices?|gadgets?)|smartwatches?|devices?|gadgets?|restrictions?|code\s*of\s*conduct|traditions?|prohibited|allowed|banned|bans?|pets?|animals?|smoking|alcohol|footwear|shoes|leather)\b"
             ],
             list_oriented=False,
             aggregation_supported=True,
             negative_aggregation_supported=False,
-            target_keys=["rules", "dress_code", "guidelines", "restrictions"],
-            description="Dress codes, photography rules, mobile phone restrictions, and pilgrim guidelines"
+            target_keys=["rules", "dress_code", "dos", "donts", "guidelines", "restrictions", "electronic_ban", "safety_guidelines"],
+            description="Dress codes, photography rules, mobile phone restrictions, electronic bans, pet policies, and pilgrim guidelines"
         ))
 
         # 17. Sevas & Poojas

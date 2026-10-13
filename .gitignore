@@ -21,3 +21,5 @@ Thumbs.db
 # Temporary runtime locks & scratch
 *.lock
 scratch/
+scratch_*
+COMPLETE_CODE_LINE_BY_LINE_EXPLANATION.txt

@@ -465,7 +465,7 @@ class PilgrimRAGService:
                 "answer": DEFAULT_REFUSAL_MESSAGE,
                 "retrieved_chunks": 0,
                 "sources": [],
-                "confidence_score": -999.0,
+                "confidence_score": 0.0,
                 "plan": plan,
                 "scope": scope
             }
@@ -484,7 +484,7 @@ class PilgrimRAGService:
                 "answer": DEFAULT_REFUSAL_MESSAGE,
                 "retrieved_chunks": len(reranked_docs),
                 "sources": [],
-                "confidence_score": max_confidence,
+                "confidence_score": 0.0,
                 "plan": plan,
                 "scope": scope
             }
@@ -529,7 +529,7 @@ class PilgrimRAGService:
             "answer": sanitized_ans,
             "retrieved_chunks": len(scoped_docs),
             "sources": sorted(list(sources_set)),
-            "confidence_score": max_confidence,
+            "confidence_score": max(0.0, float(max_confidence)),
             "plan": plan,
             "scope": scope,
             "grounding_validation": grounding_report

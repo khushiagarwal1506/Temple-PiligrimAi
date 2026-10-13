@@ -37,12 +37,16 @@ logger = logging.getLogger(__name__)
 # Default Google Maps Routes API v2 endpoint
 ROUTES_API_V2_URL = "https://routes.googleapis.com/directions/v2:computeRoutes"
 
-# Supported Travel Modes in Google Maps Routes API
 SUPPORTED_TRAVEL_MODES = {
     "driving": "DRIVE",
     "walking": "WALK",
     "bicycling": "BICYCLE",
-    "transit": "TRANSIT"
+    "transit": "TRANSIT",
+    "two_wheeler": "TWO_WHEELER",
+    "two-wheeler": "TWO_WHEELER",
+    "motorcycle": "TWO_WHEELER",
+    "bike": "TWO_WHEELER",
+    "scooter": "TWO_WHEELER"
 }
 
 
@@ -134,7 +138,10 @@ class NavigationAdapter(BaseExternalAdapter):
             return location
         else:
             # Fallback to address string
-            return {"address": str(location).strip()}
+            addr = str(location).strip()
+            if not re.search(r"\b(telangana|andhra|india)\b", addr, re.IGNORECASE):
+                addr = f"{addr}, Telangana, India"
+            return {"address": addr}
 
     def compute_route(
         self,
@@ -178,19 +185,19 @@ class NavigationAdapter(BaseExternalAdapter):
 
         api_travel_mode = SUPPORTED_TRAVEL_MODES[mode_lower]
 
-        # Transit mode does not support routingPreference in Routes API v2
+        # Routing preference is supported for DRIVE and TWO_WHEELER in Routes API v2
         payload: Dict[str, Any] = {
             "origin": self._format_waypoint(origin),
             "destination": self._format_waypoint(destination),
             "travelMode": api_travel_mode
         }
-        if api_travel_mode == "DRIVE":
+        if api_travel_mode in ("DRIVE", "TWO_WHEELER"):
             payload["routingPreference"] = routing_preference
 
         headers = {
             "Content-Type": "application/json",
             "X-Goog-Api-Key": self._api_key,
-            "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.description,routes.staticDuration"
+            "X-Goog-FieldMask": "routes.duration,routes.distanceMeters,routes.description,routes.staticDuration,routes.polyline.encodedPolyline"
         }
 
         try:
@@ -208,6 +215,11 @@ class NavigationAdapter(BaseExternalAdapter):
                     message="Navigation provider authentication failed. Please verify provider credentials.",
                     status_code=e.status_code,
                     sanitized_url=sanitize_url(self.api_url)
+                ) from None
+            elif e.status_code == 400 and api_travel_mode == "TWO_WHEELER":
+                logger.warning(f"Two-wheeler routing unsupported or bad request: {e}")
+                raise UnsupportedTravelModeError(
+                    "Two-Wheeler routing is not available for this corridor or with current provider settings. Please use Driving or Transit."
                 ) from None
             elif e.status_code == 404:
                 raise RouteNotFoundError(
@@ -228,10 +240,16 @@ class NavigationAdapter(BaseExternalAdapter):
                 status = err_dict.get("status", "")
                 if status == "NOT_FOUND" or "ZERO_RESULTS" in msg:
                     raise RouteNotFoundError("No route could be found between the specified origin and destination.")
+                if "TWO_WHEELER" in msg or "two_wheeler" in msg.lower() or "two-wheeler" in msg.lower():
+                    raise UnsupportedTravelModeError(
+                        "Two-Wheeler routing is not available for this corridor or with current provider settings. Please use Driving or Transit."
+                    )
                 raise ExternalAdapterError(f"Navigation provider returned error: {sanitize_text(msg)}")
 
             routes = data.get("routes", [])
             if not routes:
+                if api_travel_mode == "TWO_WHEELER":
+                    raise RouteNotFoundError("No Two-Wheeler route could be found between the specified origin and destination.")
                 raise RouteNotFoundError("No route could be found between the specified origin and destination.")
 
         return data

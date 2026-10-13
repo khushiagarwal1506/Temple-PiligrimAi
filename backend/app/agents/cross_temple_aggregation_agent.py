@@ -132,10 +132,10 @@ class CrossTempleAggregationAgent(BaseAgent):
 
         # Determine condition: positive vs negative
         condition = "positive"
-        if plan and getattr(plan, "condition", None) in ("positive", "negative"):
-            condition = plan.condition
-        elif re.search(r"\b(not|without|no\s+|lacks?|non[-\s]?)\b", raw_query, re.IGNORECASE):
+        if re.search(r"\b(not|without|no\s+|lacks?|non[-\s]?|don'?t|do\s+not)\b", raw_query, re.IGNORECASE):
             condition = "negative"
+        elif plan and getattr(plan, "condition", None) in ("positive", "negative"):
+            condition = plan.condition
 
         # 3. Execute Universal Aggregation across 20 temples
         agg_res = self.aggregate_temples(property_key, condition=condition, query=raw_query)

@@ -161,12 +161,16 @@ class LiveWeatherAgent(BaseAgent):
     def _extract_temperature_filter(self, query: str) -> Optional[Dict[str, Any]]:
         """
         Deterministically extracts temperature threshold or range filter criteria from query.
+        Handles °C, ° C, degrees, deg, hyphenated ranges, and word forms.
         """
         q_norm = query.lower()
 
-        # Between / Range: e.g. "between 25 and 30", "between 25 to 30", "25 to 30", "25-30"
-        range_match = re.search(r"(?:between\s+)?(\d{1,2})\s*(?:[-–—]|to|and)\s*(\d{1,2})\s*(?:°?c|degrees?|deg)?", q_norm)
-        if range_match and ("between" in q_norm or any(w in q_norm for w in ["temperature", "temperatures", "weather", "deg", "degree", "°c"])):
+        # Between / Range: e.g. "between 25°C and 27°C", "between 27°C and 30°C?", "between 25 and 30", "25 to 30", "25-30", "25–27"
+        range_match = re.search(
+            r"(?:between\s+)?(\d{1,2})(?:\s*°?\s*c|\s*degrees?)?\s*(?:[-–—]|to|and)\s*(\d{1,2})\s*(?:°?\s*c|degrees?|deg)?",
+            q_norm
+        )
+        if range_match and ("between" in q_norm or any(w in q_norm for w in ["temperature", "temperatures", "weather", "deg", "degree", "°c", "°", "celsius"])):
             min_temp = float(range_match.group(1))
             max_temp = float(range_match.group(2))
             return {
@@ -177,7 +181,10 @@ class LiveWeatherAgent(BaseAgent):
             }
 
         # Above / Greater than: e.g. "above 27°c", "above 30 degrees", "more than 28", "higher than 27"
-        above_match = re.search(r"(?:above|over|higher\s+than|more\s+than|exceeding|greater\s+than)\s*(\d{1,2})\s*(?:°?c|degrees?|deg)?", q_norm)
+        above_match = re.search(
+            r"(?:above|over|higher\s+than|more\s+than|exceeding|greater\s+than)\s*(\d{1,2})\s*(?:°?\s*c|degrees?|deg)?\b",
+            q_norm
+        )
         if above_match:
             thresh = float(above_match.group(1))
             return {
@@ -186,8 +193,11 @@ class LiveWeatherAgent(BaseAgent):
                 "description": f"above {thresh:g}°C"
             }
 
-        # Below / Under / Less than: e.g. "below 25°c", "under 28 degrees", "less than 26"
-        below_match = re.search(r"(?:below|under|less\s+than|lower\s+than)\s*(\d{1,2})\s*(?:°?c|degrees?|deg)?", q_norm)
+        # Below / Under / Less than: e.g. "below 25°c", "under 28 degrees", "less than 26", "below 27 degrees"
+        below_match = re.search(
+            r"(?:below|under|less\s+than|lower\s+than)\s*(\d{1,2})\s*(?:°?\s*c|degrees?|deg)?\b",
+            q_norm
+        )
         if below_match:
             thresh = float(below_match.group(1))
             return {
@@ -197,7 +207,10 @@ class LiveWeatherAgent(BaseAgent):
             }
 
         # Around / Approx / About: e.g. "around 26°c", "approx 28 degrees", "about 25"
-        around_match = re.search(r"(?:around|approx|about)\s*(\d{1,2})\s*(?:°?c|degrees?|deg)?", q_norm)
+        around_match = re.search(
+            r"(?:around|approx|about)\s*(\d{1,2})\s*(?:°?\s*c|degrees?|deg)?\b",
+            q_norm
+        )
         if around_match:
             target = float(around_match.group(1))
             return {
@@ -302,6 +315,79 @@ class LiveWeatherAgent(BaseAgent):
         advice.append("Follow standard temple dress codes and verify queue timings prior to arrival.")
 
         return advice
+
+    def _build_targeted_answers(
+        self,
+        query: str,
+        coord: TempleCoordinate,
+        current_temp: Optional[float],
+        condition_desc: str,
+        weather_code: Optional[int],
+        current_precip: float,
+        current_rain: float,
+        current_wind: Optional[float],
+        precip_sum_today: Optional[float],
+        precip_prob_today: Optional[int],
+        max_temp_today: Optional[float]
+    ) -> List[str]:
+        q_lower = query.lower()
+        targeted_lines = []
+
+        # 1. Umbrella query
+        if re.search(r"\b(umbrella|carry\s+(?:an\s+)?umbrella|raincoat)\b", q_lower):
+            has_rain = (
+                (precip_sum_today is not None and precip_sum_today > 0.2) or
+                (current_precip > 0.0) or
+                (precip_prob_today is not None and precip_prob_today >= 30) or
+                (weather_code is not None and weather_code in [51, 53, 55, 61, 63, 65, 80, 81, 82, 95, 96, 99])
+            )
+            prob_str = f"{precip_prob_today}%" if precip_prob_today is not None else "low"
+            sum_str = f"{precip_sum_today or current_precip} mm"
+            if has_rain:
+                targeted_lines.append(
+                    f"- **Should you carry an umbrella?**: **Yes, carrying an umbrella or light raincoat is recommended.** "
+                    f"The forecast indicates rain or precipitation ({sum_str} expected, {prob_str} probability, condition: {condition_desc})."
+                )
+            else:
+                heat_note = f" However, with highs of {max_temp_today or current_temp}°C, a compact umbrella or parasol is advisable for sun protection during open-air darshan queues." if (max_temp_today or current_temp or 0) >= 32.0 else ""
+                targeted_lines.append(
+                    f"- **Should you carry an umbrella?**: **Not strictly required for rain.** "
+                    f"Current forecast shows {condition_desc} with minimal precipitation probability ({prob_str}, {sum_str}).{heat_note}"
+                )
+
+        # 2. Rain affecting travel / Road transit query
+        if re.search(r"\b(rain\s+(?:affect|impact|delay|disrupt|cause)|travel\s+(?:impact|affect|safe|delayed|delays?)|drive|road\s+conditions?|highway\s+conditions?)\b", q_lower):
+            prob_str = f"{precip_prob_today}%" if precip_prob_today is not None else "low"
+            sum_str = f"{precip_sum_today or current_precip} mm"
+            has_heavy_rain = (
+                (precip_sum_today is not None and precip_sum_today > 5.0) or
+                (weather_code is not None and weather_code in [63, 65, 81, 82, 95, 96, 99])
+            )
+            if has_heavy_rain:
+                targeted_lines.append(
+                    f"- **Will rain affect your travel?**: **Yes, travel may be moderately to significantly impacted.** "
+                    f"Noticeable rainfall ({sum_str}, {condition_desc}) is expected, which can reduce highway visibility and create slippery driving conditions or local waterlogging. Allow extra travel time."
+                )
+            elif (precip_sum_today is not None and precip_sum_today > 0.5) or (current_precip > 0.0):
+                targeted_lines.append(
+                    f"- **Will rain affect your travel?**: **Minor impact possible.** Light showers ({sum_str}, {prob_str} prob) may cause wet road surfaces, but major delays are unlikely under current readings. Monitor local transit advisories."
+                )
+            else:
+                targeted_lines.append(
+                    f"- **Will rain affect your travel?**: **No significant rain impact is expected.** "
+                    f"Current conditions indicate {condition_desc} ({sum_str} rain), making road conditions generally favorable. Note that Ghat road checkpoints and traffic congestion should still be verified locally."
+                )
+
+        # 3. Severe weather alert query
+        if re.search(r"\b(severe\s+weather|alerts?|warnings?|cyclone|flood|storm\s+warning|emergency\s+weather)\b", q_lower):
+            targeted_lines.append(
+                f"- **Severe Weather Alert Status**: "
+                f"**No severe weather alerts can be certified by this automated meteorological feed.**\n"
+                f"  *Distinction between Forecast & Official Warnings*: Open-Meteo delivers numerical weather simulations and observations ({condition_desc}, wind: {current_wind} km/h, precipitation: {current_precip} mm). However, it does **not** broadcast official government disaster management warnings (such as IMD Red/Orange alerts, flood bulletins, or state emergency declarations). "
+                f"Even when standard weather metrics appear normal, official severe weather warnings must be confirmed directly via India Meteorological Department (IMD) or local district administration bulletins."
+            )
+
+        return targeted_lines
 
     def _run_cross_temple_threshold(
         self,
@@ -659,13 +745,50 @@ class LiveWeatherAgent(BaseAgent):
             min_temp_today=min_temp_today
         )
 
-        # 7. Check for temporal sub-intent (e.g. tomorrow, weekend)
+        # 7. Check for temporal sub-intent (e.g. tomorrow, weekend, next N days)
         q_lower = query.lower()
         temporal_focus = "current"
         tomorrow_summary = ""
         weekend_summary = ""
+        next_days_summary = ""
 
-        if "tomorrow" in q_lower and daily and len(daily.get("time", [])) > 1:
+        # Check for next N days request (e.g., "next 3 days", "next 2 days", "3 days forecast")
+        n_days_match = re.search(r"\b(?:next|for|upcoming)\s+(\d+)\s+days?\b", q_lower)
+        if not n_days_match:
+            n_days_match = re.search(r"\b(\d+)\s*[- ]*days?\s+(?:forecast|weather)\b", q_lower)
+
+        if n_days_match and daily and isinstance(daily, dict):
+            req_days = int(n_days_match.group(1))
+            total_avail = len(daily.get("time", []))
+            days_to_show = min(req_days, total_avail)
+
+            if days_to_show > 0:
+                temporal_focus = f"next_{req_days}_days"
+                day_lines = [f"\n### 📅 Forecast for the Next {req_days} Day(s)"]
+                for idx in range(days_to_show):
+                    d_time = daily["time"][idx] if idx < len(daily.get("time", [])) else f"Day {idx+1}"
+                    w_code = daily["weather_code"][idx] if idx < len(daily.get("weather_code", [])) else None
+                    w_desc = get_weather_condition_description(w_code)
+                    w_max = daily["temperature_2m_max"][idx] if idx < len(daily.get("temperature_2m_max", [])) else "N/A"
+                    w_min = daily["temperature_2m_min"][idx] if idx < len(daily.get("temperature_2m_min", [])) else "N/A"
+                    w_rain = daily["precipitation_sum"][idx] if idx < len(daily.get("precipitation_sum", [])) else 0.0
+                    w_prob = daily["precipitation_probability_max"][idx] if idx < len(daily.get("precipitation_probability_max", [])) else 0
+
+                    try:
+                        dt_obj = datetime.datetime.fromisoformat(d_time)
+                        date_label = dt_obj.strftime('%a, %b %d')
+                    except Exception:
+                        date_label = d_time
+
+                    day_label = f"**Day {idx+1} ({date_label})**" if idx > 0 else f"**Today ({date_label})**"
+                    day_lines.append(f"- {day_label}: {w_desc} | {w_min}°C – {w_max}°C | Rain: {w_rain} mm ({w_prob}% prob)")
+
+                if req_days > total_avail:
+                    day_lines.append(f"*(Note: Open-Meteo provides up to {total_avail} days of verified forecasts; days beyond day {total_avail} are currently unavailable).*")
+
+                next_days_summary = "\n".join(day_lines) + "\n"
+
+        elif "tomorrow" in q_lower and daily and len(daily.get("time", [])) > 1:
             temporal_focus = "tomorrow"
             d_time = daily["time"][1]
             d_code = daily["weather_code"][1] if len(daily.get("weather_code", [])) > 1 else None
@@ -681,7 +804,7 @@ class LiveWeatherAgent(BaseAgent):
                 f"- **Precipitation**: {d_rain} mm (Probability: {d_prob}%)\n"
             )
 
-        if "weekend" in q_lower and daily and len(daily.get("time", [])) >= 3:
+        elif "weekend" in q_lower and daily and len(daily.get("time", [])) >= 3:
             temporal_focus = "weekend"
             weekend_lines = ["\n### 🗓️ Upcoming Weekend Forecast"]
             for idx, d_time in enumerate(daily.get("time", [])):
@@ -700,16 +823,40 @@ class LiveWeatherAgent(BaseAgent):
                 weekend_summary = "\n".join(weekend_lines) + "\n"
 
         # 8. Synthesize Answer
+        targeted_answers = self._build_targeted_answers(
+            query=query,
+            coord=coord,
+            current_temp=current_temp,
+            condition_desc=condition_desc,
+            weather_code=weather_code,
+            current_precip=current_precip,
+            current_rain=current_rain,
+            current_wind=current_wind,
+            precip_sum_today=precip_sum_today,
+            precip_prob_today=precip_prob_today,
+            max_temp_today=max_temp_today
+        )
+
         lines = [
             f"## 🌤️ Weather Report for {coord.canonical_name}",
             "",
-            "### 🌡️ Current Weather Facts",
+        ]
+        if targeted_answers:
+            lines.extend([
+                "### ❓ Direct Answer to Your Query",
+                *targeted_answers,
+                ""
+            ])
+
+        lines.extend([
+            "### 🌡️ Current Weather Observations",
+            f"- **Observation Timestamp**: {retrieved_at_iso} (Asia/Kolkata)",
             f"- **Condition**: {condition_desc}",
             f"- **Current Temperature**: {current_temp}°C",
             f"- **Relative Humidity**: {current_humidity}%",
             f"- **Precipitation**: {current_precip} mm (Rain: {current_rain} mm)",
             f"- **Wind Speed**: {current_wind} km/h" + (f" ({current_wind_dir}°)" if current_wind_dir is not None else ""),
-        ]
+        ])
 
         if max_temp_today is not None and min_temp_today is not None:
             lines.append(f"- **Today's Range**: {min_temp_today}°C to {max_temp_today}°C")
@@ -718,9 +865,11 @@ class LiveWeatherAgent(BaseAgent):
         if sunrise_today and sunset_today:
             lines.append(f"- **Sunrise**: {sunrise_today} | **Sunset**: {sunset_today}")
 
-        if tomorrow_summary:
+        if next_days_summary:
+            lines.append(next_days_summary)
+        elif tomorrow_summary:
             lines.append(tomorrow_summary)
-        if weekend_summary:
+        elif weekend_summary:
             lines.append(weekend_summary)
 
         lines.extend([

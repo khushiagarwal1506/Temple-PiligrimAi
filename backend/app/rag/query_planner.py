@@ -41,14 +41,14 @@ class QueryPlanner:
             "Edupayal": ["edupayal", "edupayala", "edupayala durga", "vanadurga bhavani"],
             "Jogulamba(New)": ["jogulamba", "jogulamba(new)", "alampur", "jogulamba devi"],
             "Kaleshvaram": ["kaleshvaram", "kaleshwaram", "mukteshwara", "kaleshwara"],
-            "Karmanghat": ["karmanghat", "karmanghat hanuman"],
+            "Karmanghat": ["karmanghat", "karmaghat", "karmanghat hanuman"],
             "Medaram": ["medaram", "sammakka", "saralamma", "jatara medaram", "sammakka saralamma"],
             "Ramappa": ["ramappa", "ramalingeswara", "rudreshwara"],
             "Srisaila": ["srisaila", "srisailam", "mallikarjuna", "bhramaramba"],
             "Thousand Pillar": ["thousand pillar", "thousand pillars", "rudreswara thousand", "thousand pillar temple"],
             "Ttd": ["ttd", "tirumala", "tirupati", "venkateswara ttd", "lord venkateswara"],
             "Ujjaini": ["ujjaini", "ujjaini mahakali", "mahakali secunderabad", "secunderabad mahakali"],
-            "Veera Satyanarayana": ["veera satyanarayana", "satyanarayana swamy", "annavaram", "veera venkata satyanarayana"],
+            "Veera Satyanarayana": ["veera satyanarayana", "satyanarayana swamy", "annavaram", "annavarm", "veera venkata satyanarayana"],
             "Vemulavada": ["vemulavada", "vemulawada", "rajarajeshwara", "rajanne", "rajanna"],
             "Yadadri": ["yadadri", "yadagirigutta", "laxmi narasimha yadadri", "narasimha yadadri"]
         }

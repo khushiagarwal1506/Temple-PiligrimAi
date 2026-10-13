@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Set
 
@@ -76,9 +77,31 @@ class KnowledgeRegistry:
         """Returns list of all discovered canonical temple names (alphabetically sorted)."""
         return sorted(list(self._temple_folders.keys()))
 
+    def _canonical_key(self, temple: str) -> Optional[str]:
+        """Resolves any casing or formatting variant to the indexed canonical temple key."""
+        if not temple:
+            return None
+        if temple in self._temple_folders:
+            return temple
+        t_low = temple.lower().strip()
+        for k in self._temple_folders:
+            if k.lower().strip() == t_low:
+                return k
+        for k, f in self._temple_folders.items():
+            if f.name.lower().strip() == t_low:
+                return k
+        # Strip parentheses/spaces for alias tolerance e.g. 'jogulamba(new)' -> 'jogulamba'
+        t_clean = re.sub(r"[\(\)]", "", t_low).replace("new", "").strip()
+        for k, f in self._temple_folders.items():
+            k_clean = re.sub(r"[\(\)]", "", k.lower()).replace("new", "").strip()
+            if k_clean == t_clean:
+                return k
+        return None
+
     def get_temple_folder(self, temple: str) -> Optional[Path]:
-        """Retrieves Path object for a canonical temple."""
-        return self._temple_folders.get(temple)
+        """Retrieves Path object for a canonical temple (case-insensitive & alias-tolerant)."""
+        key = self._canonical_key(temple)
+        return self._temple_folders.get(key) if key else None
 
     def get_categories(self) -> List[str]:
         """Returns all registered category keys."""
@@ -86,21 +109,24 @@ class KnowledgeRegistry:
 
     def get_categories_for_temple(self, temple: str) -> List[str]:
         """Returns list of categories available for the given temple."""
-        cats = self._temple_categories.get(temple, set())
+        key = self._canonical_key(temple) or temple
+        cats = self._temple_categories.get(key, set())
         return sorted(list(cats))
 
     def has_category(self, temple: str, category: str) -> bool:
         """Returns True if the temple has recorded files/data for the category."""
-        return category in self._temple_categories.get(temple, set())
+        key = self._canonical_key(temple) or temple
+        return category in self._temple_categories.get(key, set())
 
     def get_source_files(self, temple: str, category: str) -> List[str]:
         """Returns list of relative source file paths for a temple and category."""
-        temple_file_map = self._temple_files.get(temple, {})
+        key = self._canonical_key(temple) or temple
+        temple_file_map = self._temple_files.get(key, {})
         if category in temple_file_map:
             return temple_file_map[category]
 
         # Check candidate files from registry as fallback
-        folder = self.get_temple_folder(temple)
+        folder = self.get_temple_folder(key)
         if not folder:
             return []
 

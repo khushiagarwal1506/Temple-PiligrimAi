@@ -58,6 +58,7 @@ TEMPLE_CANONICAL_ALIASES: Dict[str, str] = {
     "kaleshvaram": "Kaleshvaram",
     "kaleshwaram": "Kaleshvaram",
     "karmanghat": "Karmanghat",
+    "karmaghat": "Karmanghat",
     "medaram": "Medaram",
     "sammakka": "Medaram",
     "saralamma": "Medaram",
@@ -75,6 +76,7 @@ TEMPLE_CANONICAL_ALIASES: Dict[str, str] = {
     "ujjaini mahakali": "Ujjaini",
     "veera satyanarayana": "Veera Satyanarayana",
     "annavaram": "Veera Satyanarayana",
+    "annavarm": "Veera Satyanarayana",
     "satyanarayana": "Veera Satyanarayana",
     "vemulavada": "Vemulavada",
     "vemulawada": "Vemulavada",
@@ -209,14 +211,84 @@ class EmergencyAgent(BaseAgent):
 
         return " • " + " — ".join(parts) if parts else ""
 
-    def _build_universal_response(self) -> AgentResponse:
+    def _detect_and_build_immediate_action(self, query: str) -> Optional[str]:
+        """
+        Detects urgent situational crises (unresponsive person, missing child,
+        severe dehydration, dangerous flood/weather, lost valuables) and produces
+        immediate, actionable, lifesaving safety guidance first.
+        """
+        q_lower = query.lower()
+
+        # 1. Unresponsive / Unconscious / Medical Collapse
+        if re.search(r"\b(unresponsive|unconscious|fainted|passed\s+out|collapsed|not\s+breathing|cardiac|heart\s+attack|cpr)\b", q_lower):
+            return (
+                "#### ⚠️ IMMEDIATE LIFESAVING PROTOCOL — MEDICAL EMERGENCY:\n"
+                "1. **Call Medical Help Immediately**: Dial **108** (Ambulance) or **112** (All-in-one Emergency).\n"
+                "2. **Check Responsiveness & Airway**: Tap shoulders firmly and shout. Check if chest is rising. If the person is not breathing normally, begin **Chest Compressions (CPR)** immediately in the center of the chest (100–120 beats/min).\n"
+                "3. **Alert Temple Security / Volunteers**: Shout for assistance and request the nearest Automated External Defibrillator (AED) or temple first-aid squad. Clear surrounding crowds to ensure open airflow.\n"
+                "4. **Do NOT administer water, drinks, or food** to an unconscious or unresponsive individual."
+            )
+
+        # 2. Missing Child in a Crowd
+        if re.search(r"\b(missing\s+child|lost\s+child|child\s+lost|kid\s+lost|lost\s+my\s+(?:son|daughter|kid|child|baby))\b", q_lower):
+            return (
+                "#### ⚠️ IMMEDIATE MISSING CHILD PROTOCOL:\n"
+                "1. **Alert Temple Control Room**: Rush immediately to the nearest Devasthanam Help Desk, Control Room, or Police Post to initiate urgent public address announcements across all loudspeakers.\n"
+                "2. **Contact Police & Childline**: Call **100** / **112** (Police) and **1098** (National Childline).\n"
+                "3. **Seal / Monitor Exit Gates**: Request security volunteers at all perimeter gates to monitor exiting crowds for unaccompanied children.\n"
+                "4. **Provide Distinct Details**: Share child's photo, age, clothes color, and language with temple police.\n"
+                "5. **Station a Point Person**: Keep one family member stationed at the exact location where the child was separated, as children often try to backtrack."
+            )
+
+        # 3. Severe Dehydration / Heat Stroke / Heat Exhaustion
+        if re.search(r"\b(dehydrat(?:ed|ion)|heat\s*stroke|heat\s*exhaustion|sunstroke|faint(?:ing|ed)\s+from\s+heat|extreme\s+heat)\b", q_lower):
+            return (
+                "#### ⚠️ IMMEDIATE FIRST AID — SEVERE DEHYDRATION & HEAT EXHAUSTION:\n"
+                "1. **Move Out of Sun**: Immediately move the devotee into a shaded, air-cooled hall, mandapam, or medical tent.\n"
+                "2. **Cool the Body**: Loosen tight attire/footwear. Apply cool, damp cloths to neck, forehead, and underarms. Fan continuously.\n"
+                "3. **Provide Hydration (If Conscious)**: Give small sips of cool water, ORS (Oral Rehydration Solution), or electrolyte fluid.\n"
+                "4. **Emergency Escalation (108)**: If the person is vomiting, delirious, confused, or unable to drink, dial **108** immediately for medical assistance."
+            )
+
+        # 4. Flooding / Dangerous Weather / River Inundation
+        if re.search(r"\b(flood|flooding|flash\s*flood|waterlogging|cyclone|landslide|river\s+(?:overflow|rising|danger)|dangerous\s+weather)\b", q_lower):
+            return (
+                "#### ⚠️ DANGEROUS WEATHER & FLOOD SAFETY ADVISORY:\n"
+                "1. **Do Not Cross Water**: Never attempt to drive or walk through flooded causeways, overflowing ghats, or submerged road bridges. Turn around immediately.\n"
+                "2. **Seek Elevated Concrete Shelter**: Move away from river banks, steep ghat slopes prone to rockfall, and temporary pilgrim sheds. Move to multi-story concrete structures or devasthanam halls.\n"
+                "3. **Emergency Rescue**: Dial **112** (National Emergency) or **101** (Fire & Rescue) if stranded or water is rising.\n"
+                "4. **Electrical Hazards**: Stay strictly away from downed electrical wires, metal barricades, and transformers."
+            )
+
+        # 5. Lost Belongings / Stolen Wallet / Valuables
+        if re.search(r"\b(lost\s+(?:belongings|wallet|phone|mobile|bag|purse|luggage|gold|valuables)|stolen|theft|robbery|pickpocket)\b", q_lower):
+            return (
+                "#### ⚠️ LOST BELONGINGS & ASSISTANCE STEPS:\n"
+                "1. **Report to Devasthanam Lost & Found Desk**: Visit the Temple Information Centre or Administrative Office to lodge an entry with token/ticket receipts.\n"
+                "2. **Lodge Police GD Entry**: Visit the temple police outpost or dial **100** / **112** to file a Property Missing Report.\n"
+                "3. **Block Accounts & SIM**: If mobile phones or wallets were lost, immediately call your bank to freeze ATM/credit cards and contact your telecom operator to suspend the SIM card.\n"
+                "4. **Check Cloakrooms**: Confirm with luggage and footwear deposit managers in case items were handed in by temple volunteers."
+            )
+
+        return None
+
+    def _build_universal_response(self, query: str = "") -> AgentResponse:
         """Constructs statutory emergency guidance when no specific temple is identified."""
-        lines = [
+        lines = []
+        immediate_action = self._detect_and_build_immediate_action(query)
+        if immediate_action:
+            lines.extend([
+                immediate_action,
+                "",
+                "---"
+            ])
+
+        lines.extend([
             "### 🚨 Statutory National & State Emergency Helplines (India / Telangana)",
             "",
             "If you are facing an immediate life-threatening emergency, please dial the statutory helplines below:",
             ""
-        ]
+        ])
         for h in UNIVERSAL_HELPLINES:
             lines.append(f"• **{h['name']}**: `{h['number']}` — *{h['desc']}*")
 
@@ -285,7 +357,7 @@ class EmergencyAgent(BaseAgent):
 
         # 3. If no temple resolved, provide universal helplines
         if not canonical_temple:
-            return self._build_universal_response()
+            return self._build_universal_response(query)
 
         # 4. Normalize canonical temple name
         canonical_id = TEMPLE_CANONICAL_ALIASES.get(canonical_temple.lower(), canonical_temple)
@@ -361,10 +433,20 @@ class EmergencyAgent(BaseAgent):
                     office_phones.append(f"• **Devasthanam Line**: `{p}`")
 
         # 7. Construct clean, structured, non-hallucinated Markdown response
+        immediate_action = self._detect_and_build_immediate_action(query)
+
         output_sections: List[str] = [
             f"### 🚨 Emergency & Medical Information — {display_name}",
             ""
         ]
+        if immediate_action:
+            output_sections.extend([
+                immediate_action,
+                "",
+                "---",
+                f"### 📞 Verified Local & Temple Contacts — {display_name}",
+                ""
+            ])
 
         # Medical & Hospital Section
         output_sections.append("#### 🏥 Medical & Hospital Assistance")

@@ -50,20 +50,26 @@ class AgentRouter:
             r"\b(which\s+(is\s+)?(better|closer|larger|older))\b"
         ]
 
-        # 2. Itinerary / Tour Planning Triggers
+        # 2. Itinerary / Tour Planning Triggers (with typo tolerance and flexible phrasings)
         self._itinerary_patterns = [
-            r"\bplan\s+(?:(?:a|an|my|our|the)\s+)?(?:[\w-]+(?:\s+days?)?\s+)?(?:trip|tour|visit|itinerary|journey|travel|pilgrimage)\b",
-            r"\b(itinerary\s+(for|to|of)|tour\s+plan|travel\s+itinerary|day\s+trip|weekend\s+trip|pilgrimage\s+itinerary)\b",
-            r"\b(how\s+to\s+plan\s+(my\s+)?visit)\b"
+            r"\b(?:plan|make|create|schedule|prepare|draft|build)\s+(?:(?:a|an|my|our|the)\s+)?(?:[\w.-]+\s+)*(?:itinerary|iternary|itinery|itineray|trip|tour|journey|travel|pilgrimage)\b",
+            r"\b(?:plan\s+(?:(?:a|an|my|our|the)\s+)?(?:[\w.-]+\s+)*to\s+(?:go|visit|travel))\b",
+            r"\b(?:itinerary|iternary|itinery|itineray)\s+(?:for|to|of)\b",
+            r"\b(?:tour\s+plan|travel\s+itinerary|travel\s+iternary|day\s+trip|weekend\s+trip|pilgrimage\s+itinerary|pilgrimage\s+iternary)\b",
+            r"\b(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven)\s*[- ]\s*days?\s+(?:itinerary|iternary|itinery|itineray|trip|tour|visit|plan)\b",
+            r"\b(?:itinerary|iternary|itinery|itineray)\s+(?:for\s+)?(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven)\s*[- ]\s*days?\b",
+            r"\b(?:go\s+to|visit|travel\s+to|trip\s+to)\s+(?:[\w\s.-]+\s+)?for\s+(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven)\s*[- ]\s*days?\b",
+            r"\bfor\s+(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven)\s*[- ]\s*days\b",
+            r"\bhow\s+to\s+plan\s+(?:my|our|a|the)?\s*visit\b"
         ]
 
         # 3. Cross-Temple Aggregation Triggers
         self._aggregation_patterns = [
             r"\b(which\s+(all\s+)?temples)\b",
-            r"\b(list\s+(all\s+)?temples)\b",
+            r"\b(list\s+(all\s+|the\s+)?temples)\b",
             r"\b(how\s+many\s+temples)\b",
             r"\b(all\s+temples\s+(that|with|without|having|offering|providing|located))\b",
-            r"\b(temples\s+(with|without|having|offering|providing|located\s+on))\b"
+            r"\b(temples\s+(that\s+)?(with|without|do\s+not\s+|don'?t\s+|having|offering|providing|located\s+on))\b"
         ]
 
         # 4. Famous Non-Registered Temples for Anti-Hallucination Rejection
@@ -78,8 +84,8 @@ class AgentRouter:
         self._temple_indicators = [
             "temple", "temples", "mandir", "devasthanam", "kovil", "timings", "timing",
             "hours", "darshan", "seva", "sevas", "pooja", "poojas", "puja", "prasadam",
-            "harathi", "abhishekam", "festival", "festivals", "accommodation", "rooms",
-            "cottages", "history", "dress code", "rules", "dos and don'ts", "facilities",
+            "harathi", "abhishekam", "festival", "festivals", "accommodation", "accomodation",
+            "rooms", "cottages", "history", "dress code", "rules", "dos and don'ts", "facilities",
             "parking", "wheelchair", "location", "address", "reach", "travel", "contact"
         ]
 
@@ -89,24 +95,35 @@ class AgentRouter:
             "travel": [r"\b(reach|how\s+to\s+reach|how\s+can\s+i\s+reach|transport|bus|train|railway|airport)\b"],
             "sevas": [r"\b(sevas?|poojas?|pujas?|abhishekam|kalyanam|harathi)\b"],
             "facilities": [r"\b(facilities|facility|parking|wheelchair|amenities)\b"],
-            "accommodation": [r"\b(accommodation|rooms?|cottages?|stay|guest\s*houses?|choultry)\b"],
+            "accommodation": [r"\b(accommodation|accomodation|rooms?|cottages?|stay|guest\s*houses?|choultry)\b"],
             "prasadam": [r"\b(prasadam|food|annadanam|meals?)\b"],
             "history": [r"\b(history|origin|significance|mythology|story)\b"],
             "comparison": [r"\b(compare|comparison|versus|vs\.?)\b"],
             "itinerary": [
-                r"\bplan\s+(?:(?:a|an|my|our|the)\s+)?(?:[\w-]+(?:\s+days?)?\s+)?(?:trip|tour|visit|itinerary|journey|travel|pilgrimage)\b",
-                r"\b(itinerary\s+(for|to|of)|tour\s+plan|travel\s+itinerary|day\s+trip|weekend\s+trip|pilgrimage\s+itinerary)\b"
+                r"\b(?:plan|make|create|schedule|prepare|draft|build)\s+(?:(?:a|an|my|our|the)\s+)?(?:[\w.-]+\s+)*(?:itinerary|iternary|itinery|itineray|trip|tour|journey|travel|pilgrimage)\b",
+                r"\b(?:plan\s+(?:(?:a|an|my|our|the)\s+)?(?:[\w.-]+\s+)*to\s+(?:go|visit|travel))\b",
+                r"\b(?:itinerary|iternary|itinery|itineray)\s+(?:for|to|of)\b",
+                r"\b(?:tour\s+plan|travel\s+itinerary|travel\s+iternary|day\s+trip|weekend\s+trip|pilgrimage\s+itinerary|pilgrimage\s+iternary)\b",
+                r"\b(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven)\s*[- ]\s*days?\s+(?:itinerary|iternary|itinery|itineray|trip|tour|visit|plan)\b",
+                r"\b(?:itinerary|iternary|itinery|itineray)\s+(?:for\s+)?(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven)\s*[- ]\s*days?\b",
+                r"\b(?:go\s+to|visit|travel\s+to|trip\s+to)\s+(?:[\w\s.-]+\s+)?for\s+(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven)\s*[- ]\s*days?\b",
+                r"\bfor\s+(?:\d+(?:\.\d+)?|one|two|three|four|five|six|seven)\s*[- ]\s*days\b"
             ],
             "weather": [
                 r"\b(weather|forecast|temperature|rain|raining|rainfall|climate|humidity|wind)\b",
                 r"\b(will\s+it\s+rain|is\s+it\s+raining)\b"
             ],
             "budget": [
-                r"\b(budget|costs?|prices?|expenses?|tariff|fees?|ticket\s+rates?)\b",
-                r"\b(how\s+much\s+(?:will|does|to|would)?\s*(?:it|a|the|visit|trip|darshan|seva|accommodation|stay)?\s*(?:cost|spend|need|take))\b",
+                r"\b(budget|expenses?|tariff|ticket\s+rates?)\b",
+                r"\b((?:how\s+much|what)\s+(?:will|does|to|would|is)?\s*(?:it|a|the|visit|trip)?\s*(?:cost|spend|need|take))\b",
+                r"\b(?:what|how\s+much)\s+will\s+(?:a|the|my|our)?\s*(?:trip|visit|tour)\s+cost\b",
                 r"\b(calculate\s+(?:my|the|a)?\s*budget)\b",
-                r"\b(?:under|within|below)\s+(?:a\s+budget\s+of\s+)?₹?\s*\d+\b",
-                r"\b(?:with\s+(?:a\s+)?budget\s+(?:of\s+)?₹?\s*\d+)\b"
+                r"\b(?:change|update|set|make|increase|decrease|reduce)\s+(?:my|the)?\s*budget\b",
+                r"\b(?:under|within|below)\s+(?:a\s+)?budget\s+(?:of\s+)?(?:rs\.?|inr|₹)?\s*\d+\b",
+                r"\b(?:under|within|below)\s+(?:rs\.?|inr|₹)\s*\d+\b",
+                r"\b(?:with\s+(?:a\s+)?budget\s+(?:of\s+)?(?:rs\.?|inr|₹)?\s*\d+)\b",
+                r"\b(?:for|with|in|under|within)\s+(?:(?:rs\.?|inr|₹)\s*\d+|\d+\s*(?:rupees?|rs\.?|inr))\b",
+                r"\b\d+\s*(?:rupees|rs\.?|inr)\b"
             ],
             "navigation": [
                 r"\b(directions?|navigate|navigation|route\s*map|map\s*route)\b",
@@ -115,7 +132,9 @@ class AgentRouter:
                 r"\b(travel\s+time|driving\s+time|travel\s+duration|driving\s+duration|duration|road\s+distance|driving\s+distance|distance)\b",
                 r"\b(route|routes)(?!\s+itinerary)\b",
                 r"\b(go\s+from|travel\s+from|drive\s+from|get\s+from|how\s+to\s+get\s+from|how\s+to\s+reach)\b",
-                r"\b(eta|estimated\s+arrival|journey)\b"
+                r"\b(eta|estimated\s+arrival|journey)\b",
+                r"\b(?:hyderabad|secunderabad|warangal|karimnagar|nizamabad|khammam|nalgonda|suryapet|mahabubnagar|siddipet|ramagundam|mancherial|kazipet|hanamkonda|vijayawada|guntur|visakhapatnam|tirupati|bengaluru|bangalore|chennai|mumbai|delhi|pune)\s+to\s+[\w\s]+\b",
+                r"\b[\w\s,.-]+?\s+to\s+[\w\s,.-]+?\s+(?:driving|drive|by\s+road|by\s+car|by\s+bus|transit|walking|walk)\b"
             ],
             "emergency": [
                 r"\b(emergency|emergencies|emergency\s*contacts?|emergency\s*numbers?)\b",
@@ -124,7 +143,7 @@ class AgentRouter:
                 r"\b(help\s*desk|helpline|helplines|urgent\s*help|doctor|doctors|trauma)\b"
             ],
             "recommendation": [
-                r"\b(recommend|recommendation|recommendations|suggest|suggestion|suggestions)\b",
+                r"\b(recommend|recomend|recommed|recommendation|recomendation|recommendations|suggest|suggestion|suggestions)\b",
                 r"\b(which\s+temple\s+(?:should|can|to)\s+(?:i|we)\s+visit)\b",
                 r"\b(where\s+should\s+(?:i|we)\s+go)\b",
                 r"\b(which\s+temple\s+suits?\s+(?:me|us))\b"
@@ -135,28 +154,45 @@ class AgentRouter:
         self._weather_patterns = [
             r"\b(weather|temperature|temperatures|forecast|rain|raining|rainfall|climate|humidity|wind)\b",
             r"\b(will\s+it\s+rain|is\s+it\s+raining|how\s+(hot|cold|warm)\s+is\s+it)\b",
-            r"\b(?:above|below|under|over|around|between)\s*\d+\s*(?:°?c|degrees?|deg)?\b",
-            r"\b\d+\s*(?:°?c|degrees?|deg)\b"
+            r"\b(?:above|below|under|over|around|between)\s*\d+\s*(?:°?\s*c|°|degrees?|deg)?\b",
+            r"\b\d+\s*(?:°?\s*c|°|degrees?|deg)\b",
+            r"\b\d+\s*(?:[-–—]|to|and)\s*\d+\s*(?:°?\s*c|°|degrees?|deg)\b",
+            r"\b(?:between\s+)?\d+(?:\s*°?\s*c|\s*degrees?)?\s*(?:[-–—]|to|and)\s*\d+(?:\s*°?\s*c|\s*degrees?)?\b"
         ]
 
         # 8. Budget Triggers
         self._budget_patterns = [
-            r"\b(budget|costs?|prices?|expenses?|tariff|fees?|ticket\s+rates?)\b",
-            r"\b(how\s+much\s+(?:will|does|to|would)?\s*(?:it|a|the|visit|trip|darshan|seva|accommodation|stay)?\s*(?:cost|spend|need|take))\b",
+            r"\b(budget|expenses?|tariff|ticket\s+rates?)\b",
+            r"\b((?:how\s+much|what)\s+(?:will|does|to|would|is)?\s*(?:it|a|the|visit|trip)?\s*(?:cost|spend|need|take))\b",
+            r"\b(?:what\s+does|how\s+much\s+(?:does|is))\s+[\w\s]+\s+cost\b",
+            r"\b(?:what|how\s+much)\s+will\s+(?:a|the|my|our)?\s*(?:trip|visit|tour)\s+cost\b",
             r"\b(calculate\s+(?:my|the|a)?\s*budget)\b",
-            r"\b(?:under|within|below)\s+(?:a\s+budget\s+of\s+)?₹?\s*\d+\b",
-            r"\b(?:with\s+(?:a\s+)?budget\s+(?:of\s+)?₹?\s*\d+)\b"
+            r"\b(?:change|update|set|make|increase|decrease|reduce)\s+(?:my|the)?\s*budget\b",
+            r"\b(?:under|within|below)\s+(?:a\s+)?budget\s+(?:of\s+)?(?:rs\.?|inr|₹)?\s*\d+\b",
+            r"\b(?:under|within|below)\s+(?:rs\.?|inr|₹)\s*\d+\b",
+            r"\b(?:with\s+(?:a\s+)?budget\s+(?:of\s+)?(?:rs\.?|inr|₹)?\s*\d+)\b",
+            r"\b(?:for|with|in|under|within)\s+(?:(?:rs\.?|inr|₹)\s*\d+|\d+\s*(?:rupees?|rs\.?|inr))\b",
+            r"\b\d+\s*(?:rupees|rs\.?|inr)\b"
         ]
 
         # 9. Navigation Triggers
         self._navigation_patterns = [
             r"\b(directions?|navigate|navigation|route\s*map|map\s*route)\b",
+            r"\b(directions?\s+(?:to|from))\b",
             r"\b(how\s+far|how\s+long(?:\s+(?:would|will|does|can|might)\s+it\s+take)?)\b",
             r"\b(?:takes?|take\s+to\s+reach)\b",
             r"\b(travel\s+time|driving\s+time|travel\s+duration|driving\s+duration|duration|road\s+distance|driving\s+distance|distance)\b",
             r"\b(route|routes)(?!\s+itinerary)\b",
-            r"\b(go\s+from|travel\s+from|drive\s+from|get\s+from|how\s+to\s+get\s+from|how\s+to\s+reach)\b",
-            r"\b(eta|estimated\s+arrival|journey)\b"
+            r"\b(go\s+from|travel\s+from|drive\s+from|get\s+from|how\s+to\s+get\s+from|how\s+to\s+reach|how\s+to\s+go\s+to)\b",
+            r"\b(how\s+(?:can|do|should|would)\s+(?:i|we)\s+reach)\b",
+            r"\b(how\s+can\s+i\s+go\s+to|how\s+do\s+i\s+go\s+to)\b",
+            r"\b(?:reach\s+(?:from\s+[\w\s]+?\s+to|[\w\s]+?\s+from))\b",
+            r"\b(eta|estimated\s+arrival|journey)\b",
+            r"\b(?:road\s+from|road\s+to|by\s+road)\b",
+            r"\b(?:between\s+.+?\s+and\s+.+?\s+by\s+road)\b",
+            r"\b(?:want\s+to\s+visit|planning\s+to\s+visit)\b",
+            r"\b(?:hyderabad|secunderabad|warangal|karimnagar|nizamabad|khammam|nalgonda|suryapet|mahabubnagar|siddipet|ramagundam|mancherial|kazipet|hanamkonda|vijayawada|guntur|visakhapatnam|tirupati|bengaluru|bangalore|chennai|mumbai|delhi|pune)\s+to\s+[\w\s]+\b",
+            r"\b[\w\s,.-]+?\s+to\s+[\w\s,.-]+?\s+(?:driving|drive|by\s+road|by\s+car|by\s+bus|transit|walking|walk)\b"
         ]
 
         # 10. Voice / Multilingual Triggers
@@ -181,7 +217,7 @@ class AgentRouter:
 
         # 12. Recommendation Triggers
         self._recommendation_patterns = [
-            r"\b(recommend|recommendation|recommendations|suggest|suggestion|suggestions)\b",
+            r"\b(recommend|recomend|recommed|recomand|recommand|recommendation|recomendation|recommendations|suggest|suggestion|suggestions)\b",
             r"\b(which\s+temple\s+(?:should|can|to)\s+(?:i|we)\s+visit)\b",
             r"\b(which\s+temple\s+has\s+(?:the\s+)?facilities)\b",
             r"\b(which\s+temples?\s+(?:are\s+good|suitable|best\s+for|has|have))\b",
@@ -191,16 +227,65 @@ class AgentRouter:
         ]
 
     def _detect_temples(self, query: str) -> List[str]:
-        """Detects all registered canonical temples mentioned in the query."""
+        """Detects all registered canonical temples mentioned in the query in order of appearance."""
+        from app.agents.coordinate_registry import _CANONICAL_TEMPLE_ALIASES
         q_norm = query.lower()
-        detected = []
-        for canonical_id, aliases in self.planner.temple_aliases.items():
+        # Merge planner aliases and coordinate registry aliases
+        combined_aliases: Dict[str, Set[str]] = {}
+        for c, a_list in self.planner.temple_aliases.items():
+            combined_aliases.setdefault(c, set()).update(a_list)
+        for c, a_list in _CANONICAL_TEMPLE_ALIASES.items():
+            target_key = c
+            for k in combined_aliases:
+                if k.lower() == c.lower():
+                    target_key = k
+                    break
+            combined_aliases.setdefault(target_key, set()).update(a_list)
+
+        matches: List[Tuple[int, str]] = []
+        for canonical_id, aliases in combined_aliases.items():
             for alias in sorted(aliases, key=len, reverse=True):
                 pattern = r'\b' + re.escape(alias) + r'\b'
-                if re.search(pattern, q_norm):
-                    detected.append(canonical_id)
+                m = re.search(pattern, q_norm)
+                if m:
+                    matches.append((m.start(), canonical_id))
                     break
-        return detected
+
+        matches.sort(key=lambda x: x[0])
+        ordered: List[str] = []
+        for _, cid in matches:
+            if cid not in ordered:
+                ordered.append(cid)
+
+        # Fallback fuzzy entity resolution for spelling variants (e.g. annavarm -> annavaram, karmaghat -> karmanghat)
+        import difflib
+        words = re.findall(r'[a-zA-Z]{5,}', q_norm)
+        already_matched = set(ordered)
+        fuzzy_added = []
+        for w in words:
+            for canonical_id, aliases in combined_aliases.items():
+                if canonical_id in already_matched:
+                    continue
+                for alias in aliases:
+                    if len(alias.split()) == 1 and len(alias) >= 5:
+                        sim = difflib.SequenceMatcher(None, w, alias).ratio()
+                        if sim >= 0.82 and abs(len(w) - len(alias)) <= 2:
+                            m_pos = q_norm.find(w)
+                            fuzzy_added.append((m_pos, canonical_id))
+                            already_matched.add(canonical_id)
+                            break
+                if canonical_id in already_matched:
+                    break
+
+        if fuzzy_added:
+            matches.extend(fuzzy_added)
+            matches.sort(key=lambda x: x[0])
+            ordered = []
+            for _, cid in matches:
+                if cid not in ordered:
+                    ordered.append(cid)
+
+        return ordered
 
     def _detect_unregistered_temple(self, query: str) -> Optional[str]:
         """Detects if an explicit non-registered temple is referenced."""
@@ -209,13 +294,24 @@ class AgentRouter:
             if re.search(r"\b" + re.escape(name) + r"\b", q_lower):
                 return name.title()
 
+        # If any registered temple is already detected in the query, do not hallucinate an unregistered temple from connecting words
+        if self._detect_temples(query):
+            return None
+
         pattern = r"\b([A-Za-z]+(?:\s+[A-Za-z]+)?)\s+(temple|mandir|kovil|devasthanam)\b"
         stopwords = {
             "the", "a", "an", "this", "that", "these", "those", "which", "what", "where",
             "who", "how", "why", "when", "are", "is", "was", "were", "be", "been",
             "do", "does", "did", "have", "has", "had", "any", "all", "our", "your",
             "my", "their", "its", "some", "of", "in", "at", "to", "for", "with", "about",
-            "suggest", "recommend", "visit", "find"
+            "suggest", "recommend", "recomend", "recommed", "suggestion", "suggestions",
+            "visit", "find", "plan", "itinerary", "iternary", "trip", "tour", "day", "days",
+            "one", "two", "three", "four", "five", "nearby", "good", "best", "famous",
+            "tell", "show", "give", "me", "us", "i", "we", "can", "could", "would", "should",
+            "include", "including", "contain", "contains", "containing", "mention", "mentioning",
+            "provide", "providing", "list", "listing", "info", "information", "details",
+            "time", "times", "timings", "timing", "combining", "combine", "between", "both", "second",
+            "around", "near", "cost", "costs", "price", "prices", "budget", "stay", "accommodation", "other"
         }
         for match in re.finditer(pattern, query, re.IGNORECASE):
             candidate = match.group(1).strip()
@@ -224,24 +320,21 @@ class AgentRouter:
             if not meaningful:
                 continue
             cleaned = " ".join(meaningful)
-            if not self.planner.detect_temple(cleaned):
-                return f"{cleaned.title()} {match.group(2).title()}"
+            if self._detect_temples(cleaned) or self.planner.detect_temple(cleaned):
+                continue
+            # Ensure candidate starts with capital letter or is not lowercase filler
+            raw_cand = match.group(1).strip()
+            if not any(w[0].isupper() for w in raw_cand.split() if w):
+                continue
+            return f"{cleaned.title()} {match.group(2).title()}"
 
         return None
 
     def _detect_multi_intent(self, query: str) -> List[str]:
         """
         Detects if query conjoins multiple distinct sub-topics
-        (e.g., 'timings and how to reach', or 'itinerary with budget 5000').
+        (e.g., 'timings and how to reach', 'itinerary with budget 5000', or 'plan 2 day trip to kaleshwaram budget 9000 mention temperature').
         """
-        conjunction_match = re.search(r"\b(and|also|as\s+well\s+as|along\s+with|&)\b", query, re.IGNORECASE)
-        preposition_multi_intent = (
-            re.search(r"\b(?:plan|itinerary|trip|tour)\b.*\b(?:with\s+(?:a\s+)?budget|under\s+(?:a\s+budget\s+of\s+)?₹?\s*\d+)\b", query, re.IGNORECASE) or
-            re.search(r"\b(?:with\s+(?:a\s+)?budget|under\s+(?:a\s+budget\s+of\s+)?₹?\s*\d+)\b.*\b(?:plan|itinerary|trip|tour)\b", query, re.IGNORECASE)
-        )
-        if not conjunction_match and not preposition_multi_intent:
-            return []
-
         matched_sub_intents = []
         for cat_name, patterns in self._sub_intent_patterns.items():
             for pat in patterns:
@@ -249,7 +342,32 @@ class AgentRouter:
                     matched_sub_intents.append(cat_name)
                     break
 
-        return matched_sub_intents if len(matched_sub_intents) >= 2 else []
+        if len(matched_sub_intents) < 2:
+            return []
+
+        # If recommendation intent is present without explicit multi-stage actions (like itinerary planning or navigation)
+        if "recommendation" in matched_sub_intents and not any(k in matched_sub_intents for k in ["itinerary", "navigation"]):
+            return []
+
+        # If 2 or more distinct execution domain intents are detected (e.g. itinerary + budget, itinerary + weather, budget + weather):
+        execution_domains = {"itinerary", "budget", "weather", "navigation", "emergency"}
+        matched_exec_domains = [si for si in matched_sub_intents if si in execution_domains]
+        if len(matched_exec_domains) >= 2:
+            return matched_sub_intents
+
+        # Recommendation conjoined with multiple other intents via conjunction
+        if "recommendation" in matched_sub_intents and len(matched_exec_domains) >= 1 and re.search(r"\b(and|also|as\s+well\s+as|along\s+with|&)\b", query, re.IGNORECASE):
+            return matched_sub_intents
+
+        conjunction_match = re.search(r"\b(and|also|as\s+well\s+as|along\s+with|&)\b", query, re.IGNORECASE)
+        preposition_multi_intent = (
+            re.search(r"\b(?:plan|itinerary|trip|tour)\b.*\b(?:with\s+(?:a\s+)?budget|under\s+(?:a\s+budget\s+of\s+)?₹?\s*\d+|(?:with|for|under|within)\s+(?:(?:rs\.?|inr|₹)\s*\d+|\d+\s*(?:rupees?|rs\.?|inr)))\b", query, re.IGNORECASE) or
+            re.search(r"\b(?:with\s+(?:a\s+)?budget|under\s+(?:a\s+budget\s+of\s+)?₹?\s*\d+|(?:with|for|under|within)\s+(?:(?:rs\.?|inr|₹)\s*\d+|\d+\s*(?:rupees?|rs\.?|inr)))\b.*\b(?:plan|itinerary|trip|tour)\b", query, re.IGNORECASE)
+        )
+        if conjunction_match or preposition_multi_intent:
+            return matched_sub_intents
+
+        return []
 
     def route(self, query: str) -> AgentRouteDecision:
         """
@@ -269,6 +387,18 @@ class AgentRouter:
             )
 
         clean_query = query.strip()
+
+        # Priority 1.5: Direct Arithmetic Expression
+        from app.agents.coordinator import evaluate_arithmetic_query
+        if evaluate_arithmetic_query(clean_query):
+            return AgentRouteDecision(
+                selected_agent="coordinator",
+                intent="arithmetic",
+                confidence=1.0,
+                reason="Query is a direct arithmetic calculation.",
+                metadata={"arithmetic": True}
+            )
+
         detected_temples = self._detect_temples(clean_query)
 
         # -------------------------------------------------------------
@@ -354,7 +484,8 @@ class AgentRouter:
         # Travel semantics override comparison semantics when travel/distance/duration phrases exist
         if is_navigation_syntax and not is_comparison_syntax and not is_itinerary_syntax:
             sub_intents = self._detect_multi_intent(clean_query)
-            if len(sub_intents) >= 2:
+            distinct_non_nav_intents = [si for si in sub_intents if si not in ("navigation", "travel")]
+            if len(distinct_non_nav_intents) >= 1 and len(sub_intents) >= 2:
                 return AgentRouteDecision(
                     selected_agent="none",
                     intent="multi_intent",
@@ -388,12 +519,14 @@ class AgentRouter:
         # Priority 3.5: Comparison Intent
         # -------------------------------------------------------------
         is_weather_syntax = any(re.search(p, clean_query, re.IGNORECASE) for p in self._weather_patterns)
-        if (is_comparison_syntax or (len(detected_temples) >= 2 and not is_itinerary_syntax and not is_budget_syntax and not is_navigation_syntax)) and not is_weather_syntax:
+        is_accom_syntax = any(re.search(p, clean_query, re.IGNORECASE) for p in self._sub_intent_patterns["accommodation"]) or bool(re.search(r"\bhotels?\b", clean_query, re.IGNORECASE))
+        is_rest_syntax = any(re.search(p, clean_query, re.IGNORECASE) for p in self._sub_intent_patterns["prasadam"]) or bool(re.search(r"\b(restaurants?|food|dining|dhabas?)\b", clean_query, re.IGNORECASE))
+        if is_comparison_syntax or (len(detected_temples) >= 2 and not is_itinerary_syntax and not is_budget_syntax and not is_navigation_syntax and not is_weather_syntax and not is_accom_syntax and not is_rest_syntax):
             # If query is conjoined with factual sub-intents, route to multi_intent
             sub_intents = self._detect_multi_intent(clean_query)
             non_comp_intents = [si for si in sub_intents if si != "comparison"]
-            # Exclude topic attributes (budget, navigation, sevas/accommodation/timings) from forcing multi_intent when comparing
-            if is_comparison_syntax and set(non_comp_intents) <= {"budget", "navigation", "travel", "sevas", "accommodation", "prasadam", "timings", "facilities"}:
+            # Exclude topic attributes (budget, navigation, sevas/accommodation/timings/weather) from forcing multi_intent when comparing
+            if is_comparison_syntax and set(non_comp_intents) <= {"budget", "navigation", "travel", "sevas", "accommodation", "prasadam", "timings", "facilities", "weather"}:
                 non_comp_intents = []
             if len(non_comp_intents) >= 2:
                 return AgentRouteDecision(
@@ -424,7 +557,16 @@ class AgentRouter:
         # -------------------------------------------------------------
         # Priority 3.8: Budget Intent (Evaluated before itinerary so 'budget to plan a trip' routes to budget)
         # -------------------------------------------------------------
-        if is_budget_syntax and len(detected_temples) >= 1:
+        is_category_price_query = (
+            bool(re.search(
+                r"\b(?:what\s+(?:are\s+)?(?:the\s+)?(?:all\s+)?(?:different\s+)?sevas?|which\s+sevas|list\s+sevas|all\s+sevas|seva\s+(?:list|prices?|rates?|details)|sevas?\s+(?:list|prices?|rates?|details|available|offered)|book\s+at\s+[\w\s]+,\s*and\s+what\s+do\s+they\s+cost|sevas?\s+(?:can\s+i|available)|recommendations?\s+and\s+accommodation|accommodation\s+(?:options?|tariff|rates?|list)|prasadam\s+(?:list|prices?|rates?|items?)|what\s+are\s+the\s+prices\s+of\s+sevas?)\b",
+                clean_query,
+                re.IGNORECASE
+            ))
+            and not bool(re.search(r"\b(trip\s+budget|travel\s+budget|total\s+budget|overall\s+budget|calculate\s+budget|prepare\s+(?:a\s+)?budget|my\s+budget|trip\s+cost|total\s+cost|visit\s+cost|tour\s+cost|plan\s+budget|estimate\s+(?:the\s+)?expenses)\b", clean_query, re.IGNORECASE))
+            and not bool(re.search(r"\b(?:budget\s+(?:of|is|limit)|under\s+(?:a\s+budget|₹|rs)|within\s+(?:a\s+budget|₹|rs))\b", clean_query, re.IGNORECASE))
+        )
+        if is_budget_syntax and len(detected_temples) >= 1 and not is_category_price_query:
             sub_intents = self._detect_multi_intent(clean_query)
             if len(sub_intents) >= 2:
                 return AgentRouteDecision(
@@ -506,7 +648,8 @@ class AgentRouter:
         # -------------------------------------------------------------
         # Priority 5.5: Recommendation Intent
         # -------------------------------------------------------------
-        if any(re.search(p, clean_query, re.IGNORECASE) for p in self._recommendation_patterns):
+        is_recommend_explicit = bool(re.search(r"\b(recommend|recomend|recommed|suggestion|suggestions|suggest)\b", clean_query, re.IGNORECASE))
+        if any(re.search(p, clean_query, re.IGNORECASE) for p in self._recommendation_patterns) and (not is_weather_syntax or is_recommend_explicit):
             # If query is conjoined with other distinct sub-intents, route to multi_intent
             sub_intents = self._detect_multi_intent(clean_query)
             if len(sub_intents) >= 2:
@@ -564,7 +707,12 @@ class AgentRouter:
                 "which temple" in clean_query.lower() or
                 "which temples" in clean_query.lower() or
                 "any temple" in clean_query.lower() or
-                bool(re.search(r'(?:above|below|over|under|greater than|less than|around|between)\s+\d+', clean_query, re.IGNORECASE))
+                "all temples" in clean_query.lower() or
+                "temples with" in clean_query.lower() or
+                "temples having" in clean_query.lower() or
+                "temples" in clean_query.lower() or
+                bool(re.search(r'(?:above|below|over|under|greater than|less than|around|between)\s+\d+', clean_query, re.IGNORECASE)) or
+                bool(re.search(r'\b\d+\s*(?:°?\s*c|degrees?|deg)\b', clean_query, re.IGNORECASE))
             )
             if detected_temples or has_cross_temple_weather:
                 is_active = "live_weather" in self.active_agents
@@ -645,19 +793,21 @@ class AgentRouter:
             )
 
         # -------------------------------------------------------------
-        # Priority 7: Single Known-Temple Factual Information (Active Agent)
+        # Priority 7: Known-Temple Factual Information (Active Agent)
         # -------------------------------------------------------------
-        if len(detected_temples) == 1:
+        if len(detected_temples) >= 1:
             temple_name = detected_temples[0]
+            temples_label = ", ".join(detected_temples)
             return AgentRouteDecision(
                 selected_agent="temple_information",
                 intent="temple_information",
                 confidence=0.95,
-                reason=f"Query contains registered temple '{temple_name}' and factual temple information intent.",
+                reason=f"Query contains registered temple(s) '{temples_label}' and factual temple information intent.",
                 metadata={
                     "available": True,
                     "target_agent": "TempleInformationAgent",
-                    "detected_temple": temple_name
+                    "detected_temple": temple_name,
+                    "detected_temples": detected_temples
                 }
             )
 

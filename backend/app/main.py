@@ -14,9 +14,13 @@ if str(backend_dir) not in sys.path:
 from dotenv import load_dotenv
 load_dotenv()
 
+os.environ.setdefault("HF_HUB_OFFLINE", "1")
+os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
 from app.api.chat import router as chat_router
 from app.api.maps import router as maps_router
 from app.api.auth import router as auth_router
+from app.api.chat_history import router as chat_history_router
 
 app = FastAPI(
     title="PilgrimAI Local Offline RAG API",
@@ -32,9 +36,11 @@ logger = logging.getLogger(__name__)
 async def startup_event():
     """FastAPI startup lifecycle hook - eager coordinator and RAG initialization."""
     try:
+        from app.db.chat_history import init_chat_indexes
+        init_chat_indexes()
         from app.api.chat import get_coordinator
         get_coordinator()
-        logger.info("[STARTUP SUCCESS] MasterAgentCoordinator and RAG services initialized successfully.")
+        logger.info("[STARTUP SUCCESS] MasterAgentCoordinator, RAG services, and DB indexes initialized successfully.")
     except Exception as e:
         logger.error(f"[STARTUP FAILED] Error initializing agent coordinator at startup: {e}", exc_info=True)
         raise e
@@ -52,6 +58,7 @@ app.add_middleware(
 app.include_router(chat_router)
 app.include_router(maps_router)
 app.include_router(auth_router)
+app.include_router(chat_history_router)
 
 
 # Mount Static Web Assets

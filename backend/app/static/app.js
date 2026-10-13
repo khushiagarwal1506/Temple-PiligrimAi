@@ -30,9 +30,19 @@ document.addEventListener("DOMContentLoaded", () => {
     // -------------------------------------------------------------
     let currentSessionId = getOrCreateSessionId();
     let currentLang = "en";
-    let currentSelectedTemple = "Sri Lakshmi Narasimha Swamy Temple, Yadadri";
-    let currentLat = 17.587714;
-    let currentLng = 78.948325;
+    let currentSelectedTemple = null;
+    let currentLat = null;
+    let currentLng = null;
+    let activeNavigationState = {
+        origin: "",
+        destination: "",
+        travelMode: "driving",
+        distance_km: null,
+        duration_minutes: null,
+        polyline: null,
+        origin_coordinates: null,
+        destination_coordinates: null
+    };
     let placesRequestStarted = false;
     let placesLastStatus = "NOT_STARTED";
     let placesLastResultCount = 0;
@@ -43,6 +53,7 @@ document.addEventListener("DOMContentLoaded", () => {
     let directionsService = null;
     let activeRoutePolyline = null;
     let activeRouteMarkers = [];
+    let pendingRouteToRestore = null;
     const VERIFIED_TEMPLE_REGISTRY = [
         { canonical_name: "Ahobilam", display_name: "Sri Ahobila Narasimha Swamy Temple", latitude: 15.127814, longitude: 78.718048, district: "Nandyal", state: "Andhra Pradesh" },
         { canonical_name: "Badrachalam", display_name: "Sri Sita Ramachandraswamy Temple, Bhadrachalam", latitude: 17.669822, longitude: 80.893641, district: "Bhadradri Kothagudem", state: "Telangana" },
@@ -75,6 +86,31 @@ document.addEventListener("DOMContentLoaded", () => {
     }
 
     // -------------------------------------------------------------
+    // Route Duration Formatter (Hours & Minutes)
+    // -------------------------------------------------------------
+    function formatDurationHoursMinutes(minutes) {
+        if (minutes === null || minutes === undefined || minutes === "" || isNaN(Number(minutes))) {
+            return "";
+        }
+        const m = Math.round(Number(minutes));
+        if (m <= 0) {
+            return "0 mins";
+        }
+        if (m < 60) {
+            return m === 1 ? "1 min" : `${m} mins`;
+        }
+        const hrs = Math.floor(m / 60);
+        const rem = m % 60;
+        const hrStr = hrs === 1 ? "1 hr" : `${hrs} hrs`;
+        if (rem === 0) {
+            return hrStr;
+        }
+        const minStr = rem === 1 ? "1 min" : `${rem} mins`;
+        return `${hrStr} ${minStr}`;
+    }
+    window.formatDurationHoursMinutes = formatDurationHoursMinutes;
+
+    // -------------------------------------------------------------
     // Session Lifecycle Management
     // -------------------------------------------------------------
     function getOrCreateSessionId() {
@@ -97,7 +133,25 @@ document.addEventListener("DOMContentLoaded", () => {
         }
         resetActiveSpeechUi();
         clearActiveRoute();
+        currentSelectedTemple = null;
+        currentLat = null;
+        currentLng = null;
+        if (activeInAppPlaceMarker) {
+            try { activeInAppPlaceMarker.setMap(null); } catch (e) {}
+            activeInAppPlaceMarker = null;
+        }
+        if (placesTargetTitle) {
+            placesTargetTitle.innerText = "Nearby Discoveries";
+        }
+        if (placesList) {
+            placesList.innerHTML = `<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px;">Select a temple from the list or ask a navigation/location question to discover live places.</div>`;
+        }
         
+        // Remove active state from history items
+        if (chatHistoryList) {
+            chatHistoryList.querySelectorAll(".chat-history-item").forEach(el => el.classList.remove("active"));
+        }
+
         // Reset message area to initial welcome box
         messageArea.innerHTML = `
             <div class="welcome-box" id="welcomeBox">
@@ -129,6 +183,296 @@ document.addEventListener("DOMContentLoaded", () => {
         newChatBtn.addEventListener("click", () => {
             createFreshSession();
         });
+    }
+
+    // -------------------------------------------------------------
+    // Chat History Management (MongoDB-backed User Isolation)
+    // -------------------------------------------------------------
+    const chatHistoryList = document.getElementById("chatHistoryList");
+
+    async function loadChatHistory(autoRestore = false) {
+        if (!chatHistoryList) return;
+        const token = localStorage.getItem("pilgrim_jwt");
+        if (!token) {
+            chatHistoryList.innerHTML = '<div class="history-empty-msg">Sign in to view history</div>';
+            return;
+        }
+
+        try {
+            const res = await fetch("/api/chat/history", {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (!res.ok) {
+                if (res.status === 401) {
+                    chatHistoryList.innerHTML = '<div class="history-empty-msg">Sign in to view history</div>';
+                }
+                return;
+            }
+
+            const sessions = await res.json();
+            if (!sessions || sessions.length === 0) {
+                chatHistoryList.innerHTML = '<div class="history-empty-msg">No conversations yet</div>';
+                return;
+            }
+
+            // Group sessions by Today, Yesterday, Earlier
+            const now = new Date();
+            const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+            const yesterday = new Date(today);
+            yesterday.setDate(yesterday.getDate() - 1);
+
+            const groups = {
+                today: [],
+                yesterday: [],
+                earlier: []
+            };
+
+            sessions.forEach(s => {
+                const sDate = s.updated_at ? new Date(s.updated_at) : new Date(s.created_at);
+                const sDay = new Date(sDate.getFullYear(), sDate.getMonth(), sDate.getDate());
+
+                if (sDay.getTime() >= today.getTime()) {
+                    groups.today.push(s);
+                } else if (sDay.getTime() >= yesterday.getTime()) {
+                    groups.yesterday.push(s);
+                } else {
+                    groups.earlier.push(s);
+                }
+            });
+
+            let html = "";
+            const renderGroup = (title, items) => {
+                if (!items || items.length === 0) return "";
+                let gHtml = `<div class="chat-history-group-title">${title}</div>`;
+                items.forEach(item => {
+                    const isActive = item.session_id === currentSessionId ? "active" : "";
+                    const safeTitle = escapeHtml(item.title || "Untitled Conversation");
+                    gHtml += `
+                        <div class="chat-history-item ${isActive}" data-session-id="${escapeHtml(item.session_id)}" title="${safeTitle}">
+                            <div class="chat-history-item-left">
+                                <span class="chat-history-icon">💬</span>
+                                <span class="chat-history-title">${safeTitle}</span>
+                            </div>
+                            <button type="button" class="btn-delete-session" title="Delete conversation" data-session-id="${escapeHtml(item.session_id)}">
+                                <i data-lucide="trash-2" style="width: 12px; height: 12px;"></i>
+                            </button>
+                        </div>
+                    `;
+                });
+                return gHtml;
+            };
+
+            html += renderGroup("Today", groups.today);
+            html += renderGroup("Yesterday", groups.yesterday);
+            html += renderGroup("Earlier", groups.earlier);
+
+            chatHistoryList.innerHTML = html;
+            if (window.lucide) lucide.createIcons();
+
+            // Attach event listeners for clicking conversation and deleting conversation
+            chatHistoryList.querySelectorAll(".chat-history-item").forEach(el => {
+                el.addEventListener("click", (e) => {
+                    if (e.target.closest(".btn-delete-session")) return;
+                    const sessId = el.getAttribute("data-session-id");
+                    if (sessId) {
+                        loadChatConversation(sessId);
+                    }
+                });
+            });
+
+            chatHistoryList.querySelectorAll(".btn-delete-session").forEach(btn => {
+                btn.addEventListener("click", (e) => {
+                    e.stopPropagation();
+                    const sessId = btn.getAttribute("data-session-id");
+                    if (sessId) {
+                        deleteChatConversation(sessId);
+                    }
+                });
+            });
+
+            // If autoRestore is requested (e.g. on page reload or sign-in), automatically restore active session
+            if (autoRestore) {
+                const activeId = localStorage.getItem("pilgrim_session_id");
+                let targetSessionId = null;
+                if (activeId && sessions.some(s => s.session_id === activeId)) {
+                    targetSessionId = activeId;
+                } else if (sessions.length > 0) {
+                    targetSessionId = sessions[0].session_id;
+                }
+                if (targetSessionId) {
+                    await loadChatConversation(targetSessionId);
+                }
+            }
+
+        } catch (err) {
+            console.warn("Failed to load chat history:", err);
+        }
+    }
+
+    let activeLoadingSessionId = null;
+
+    async function loadChatConversation(sessionId) {
+        if (!sessionId) return;
+        const token = localStorage.getItem("pilgrim_jwt");
+        if (!token) return;
+
+        // Cancel active voice and routes
+        if (window.speechSynthesis) window.speechSynthesis.cancel();
+        resetActiveSpeechUi();
+        clearActiveRoute();
+
+        // Update active session id and loading token to guard against async session race conditions
+        currentSessionId = sessionId;
+        activeLoadingSessionId = sessionId;
+        localStorage.setItem("pilgrim_session_id", sessionId);
+
+        // Update active class in sidebar history
+        if (chatHistoryList) {
+            chatHistoryList.querySelectorAll(".chat-history-item").forEach(el => {
+                if (el.getAttribute("data-session-id") === sessionId) {
+                    el.classList.add("active");
+                } else {
+                    el.classList.remove("active");
+                }
+            });
+        }
+
+        // Show loading state in message area
+        messageArea.innerHTML = `
+            <div style="display: flex; align-items: center; justify-content: center; height: 100%; color: var(--text-muted); font-size: 13px; gap: 8px;">
+                <span class="dot-online" style="animation: pulse 1s infinite;"></span>
+                Loading conversation...
+            </div>
+        `;
+
+        try {
+            const res = await fetch(`/api/chat/history/${encodeURIComponent(sessionId)}`, {
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+
+            // If user switched to another session while this fetch was in flight, abort rendering
+            if (activeLoadingSessionId !== sessionId) return;
+
+            if (!res.ok) {
+                appendErrorMessage("Unable to load conversation messages.");
+                return;
+            }
+
+            const messages = await res.json();
+
+            // Check again after JSON parsing
+            if (activeLoadingSessionId !== sessionId) return;
+
+            messageArea.innerHTML = "";
+
+            if (!messages || messages.length === 0) {
+                messageArea.innerHTML = `
+                    <div class="welcome-box">
+                        <h2>Empty Conversation</h2>
+                        <p>No messages in this conversation. Ask a question to begin.</p>
+                    </div>
+                `;
+                return;
+            }
+
+            let lastNavMeta = null;
+            const renderedMessageIds = new Set();
+            let lastUserContent = null;
+            let lastRole = null;
+
+            messages.forEach(msg => {
+                const msgId = msg.message_id || msg.client_message_id;
+                if (msgId && renderedMessageIds.has(msgId)) {
+                    return; // Skip duplicate message record by stable message ID
+                }
+                if (msgId) {
+                    renderedMessageIds.add(msgId);
+                }
+
+                if (msg.role === "user") {
+                    const cleanContent = (msg.content || "").trim();
+                    // Guard against consecutive duplicate unanswered user messages (e.g. from accidental duplicate submissions)
+                    if (lastRole === "user" && lastUserContent === cleanContent) {
+                        return; // Suppress duplicate unresponded user prompt on render
+                    }
+                    lastUserContent = cleanContent;
+                    lastRole = "user";
+                    appendUserMessage(msg.content, msgId);
+                } else {
+                    lastRole = "assistant";
+                    lastUserContent = null;
+                    const botData = {
+                        answer: msg.content,
+                        agent_name: msg.agent_name || "temple_information",
+                        metadata: msg.metadata || {},
+                        sources: msg.sources || [],
+                        confidence_score: msg.confidence_score,
+                        message_id: msgId
+                    };
+                    appendBotResponse(botData);
+                    if (botData.agent_name === "live_navigation" || (botData.metadata && (botData.metadata.polyline || botData.metadata.distance_km !== undefined))) {
+                        lastNavMeta = botData.metadata;
+                    }
+                }
+            });
+
+            // Restore route on map if valid saved geometry exists without making new routing provider calls
+            if (lastNavMeta && lastNavMeta.origin && lastNavMeta.destination) {
+                latestNavigationMeta = lastNavMeta;
+                if (lastNavMeta.polyline) {
+                    const btn = document.querySelector(".nav-btn-view-map");
+                    if (googleMap) {
+                        focusRouteOnMap(
+                            lastNavMeta.origin,
+                            lastNavMeta.destination,
+                            btn,
+                            lastNavMeta.origin_canonical,
+                            lastNavMeta.destination_canonical,
+                            lastNavMeta.polyline,
+                            lastNavMeta.origin_coordinates,
+                            lastNavMeta.destination_coordinates
+                        );
+                    } else {
+                        pendingRouteToRestore = {
+                            origin: lastNavMeta.origin,
+                            destination: lastNavMeta.destination,
+                            btn: btn,
+                            originCanonical: lastNavMeta.origin_canonical,
+                            destCanonical: lastNavMeta.destination_canonical,
+                            polyline: lastNavMeta.polyline,
+                            origCoords: lastNavMeta.origin_coordinates,
+                            destCoords: lastNavMeta.destination_coordinates
+                        };
+                    }
+                }
+            }
+
+            scrollToBottom();
+        } catch (err) {
+            console.error("Error loading chat conversation:", err);
+            appendErrorMessage("Failed to load conversation from server.");
+        }
+    }
+
+    async function deleteChatConversation(sessionId) {
+        if (!sessionId) return;
+        const token = localStorage.getItem("pilgrim_jwt");
+        if (!token) return;
+
+        try {
+            const res = await fetch(`/api/chat/history/${encodeURIComponent(sessionId)}`, {
+                method: "DELETE",
+                headers: { "Authorization": `Bearer ${token}` }
+            });
+            if (res.ok) {
+                if (currentSessionId === sessionId) {
+                    createFreshSession();
+                }
+                loadChatHistory();
+            }
+        } catch (err) {
+            console.error("Failed to delete session:", err);
+        }
     }
 
     // -------------------------------------------------------------
@@ -175,11 +519,20 @@ document.addEventListener("DOMContentLoaded", () => {
                 placesPanelElem.scrollIntoView({ behavior: "smooth", block: "nearest" });
             }
 
-            // Trigger discovery for current temple
-            fetchNearbyPlaces(currentSelectedTemple, currentLat, currentLng, () => {
+            // Trigger discovery for current temple if one is selected
+            if (currentSelectedTemple && currentLat && currentLng) {
+                fetchNearbyPlaces(currentSelectedTemple, currentLat, currentLng, () => {
+                    tabPlacesBtn.innerText = originalText;
+                    tabPlacesBtn.disabled = false;
+                });
+            } else {
                 tabPlacesBtn.innerText = originalText;
                 tabPlacesBtn.disabled = false;
-            });
+                if (placesTargetTitle) placesTargetTitle.innerText = "Nearby Discoveries";
+                if (placesList) {
+                    placesList.innerHTML = `<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px;">Please select a temple from the covered temples list or ask a temple question to discover nearby places.</div>`;
+                }
+            }
         });
     }
 
@@ -193,18 +546,30 @@ document.addEventListener("DOMContentLoaded", () => {
         });
     }
 
+    // Initialize Map Panel Route Planner controls
+    initMapRoutePlanner();
+
     // -------------------------------------------------------------
     // Chat Submission & Orchestration
     // -------------------------------------------------------------
+    let isSubmittingChat = false;
+
     window.sendPrompt = function(text) {
+        if (isSubmittingChat) return;
         userQuery.value = text;
         chatForm.dispatchEvent(new Event("submit"));
     };
 
     chatForm.addEventListener("submit", async (e) => {
         e.preventDefault();
+        if (isSubmittingChat) return;
+
         let question = userQuery.value.trim();
         if (!question) return;
+
+        isSubmittingChat = true;
+        submitBtn.disabled = true;
+        userQuery.disabled = true;
 
         // Apply language directive if non-English chip active
         if (currentLang === "te" && !question.toLowerCase().includes("telugu")) {
@@ -217,10 +582,12 @@ document.addEventListener("DOMContentLoaded", () => {
         const welcomeBox = document.getElementById("welcomeBox");
         if (welcomeBox) welcomeBox.style.display = "none";
 
+        // Generate stable client message identifier for idempotency & deduplication
+        const clientMessageId = "msg_" + Date.now() + "_" + Math.random().toString(36).substring(2, 9);
+
         // Append User Message Bubble
-        appendUserMessage(question);
+        appendUserMessage(question, clientMessageId);
         userQuery.value = "";
-        submitBtn.disabled = true;
 
         // Append Loading Indicator
         const loadingId = appendLoadingBubble();
@@ -237,7 +604,8 @@ document.addEventListener("DOMContentLoaded", () => {
                 headers: chatHeaders,
                 body: JSON.stringify({
                     question: question,
-                    session_id: currentSessionId
+                    session_id: currentSessionId,
+                    client_message_id: clientMessageId
                 })
             });
 
@@ -263,11 +631,17 @@ document.addEventListener("DOMContentLoaded", () => {
             // Trigger Map / Places side-effects if applicable
             handleMapSideEffects(data);
 
+            // Refresh chat history sidebar without re-rendering active conversation
+            loadChatHistory(false);
+
         } catch (err) {
             removeLoadingBubble(loadingId);
             appendErrorMessage("Connection error. Ensure local PilgrimAI backend is running on http://localhost:8000.");
         } finally {
+            isSubmittingChat = false;
             submitBtn.disabled = false;
+            userQuery.disabled = false;
+            userQuery.focus();
             scrollToBottom();
         }
     });
@@ -275,9 +649,12 @@ document.addEventListener("DOMContentLoaded", () => {
     // -------------------------------------------------------------
     // Message Rendering Helpers
     // -------------------------------------------------------------
-    function appendUserMessage(text) {
+    function appendUserMessage(text, messageId = null) {
         const row = document.createElement("div");
         row.className = "msg-row user";
+        if (messageId) {
+            row.setAttribute("data-message-id", messageId);
+        }
         row.innerHTML = `
             <div class="msg-avatar">YOU</div>
             <div class="msg-bubble-wrapper">
@@ -332,6 +709,9 @@ document.addEventListener("DOMContentLoaded", () => {
     function appendBotResponse(data) {
         const row = document.createElement("div");
         row.className = "msg-row bot";
+        if (data && (data.message_id || data.client_message_id)) {
+            row.setAttribute("data-message-id", data.message_id || data.client_message_id);
+        }
 
         // 1. Agent Name & Badge Mapping
         const badgeConfig = getAgentBadgeConfig(data.agent_name);
@@ -355,12 +735,14 @@ document.addEventListener("DOMContentLoaded", () => {
         if (data.agent_name === "live_weather" || meta.current_weather) {
             structuredCardsHtml += renderWeatherCard(meta);
         }
-        // Budget Card
-        else if (data.agent_name === "budget" || meta.calculated_total) {
+        let hasBudgetCard = false;
+        // Budget Card: render when budget specialist responds or structured budget parameters present
+        if (data.agent_name === "budget" || meta.is_budget_request === true || (meta.parameters && meta.parameters.budget_limit !== null && meta.parameters.budget_limit !== undefined) || (meta.line_items && meta.line_items.length > 0)) {
             structuredCardsHtml += renderBudgetCard(meta);
+            hasBudgetCard = true;
         }
         // Navigation Card
-        else if (data.agent_name === "live_navigation" || meta.distance_km !== undefined) {
+        else if (data.agent_name === "live_navigation" || meta.distance_km !== undefined || meta.missing_origin) {
             structuredCardsHtml += renderNavigationCard(meta);
         }
         // Itinerary Card
@@ -369,30 +751,45 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         // 3. Format Answer Markdown
-        const formattedAnswer = formatMarkdownText(data.answer);
+        let answerText = data.answer || "";
+        if (hasBudgetCard) {
+            // Structured HTML budget card already renders the budget metrics grid and line-item table.
+            // Strip duplicate Markdown budget section (title, summary, warning, and table)
+            // while preserving the separate accommodation options list, day-by-day itinerary, and connectivity.
+            answerText = answerText.replace(/##.*?Pilgrimage Budget & Expense Estimate[\s\S]*?(?=\n\s*(?:---\s*\n\s*)?#{3,4}\s*Day|\n###.*?Accommodation Options|\n###.*?Travel & Connectivity|$)/i, "");
+            answerText = answerText.replace(/###.*?Expense Breakdown[\s\S]*?(?=\n\s*(?:---\s*\n\s*)?#{3,4}\s*Day|\n###.*?Accommodation Options|\n###.*?Travel & Connectivity|$)/i, "");
+            answerText = answerText.replace(/###\s*🏨?\s*Accommodation Summary[\s\S]*?(?=\n###|\n<details|$)/i, "");
+            answerText = answerText.replace(/(?:\n\s*---\s*){2,}/g, "\n\n---\n\n").trim();
+        }
+        const formattedAnswer = formatMarkdownText(answerText);
 
-        // 4. Sources & Confidence Bar
+        // 4. Sources & Confidence Bar (Expandable, unobtrusive evidence drawer)
         let sourcesHtml = "";
         if (data.sources && data.sources.length > 0) {
             const chips = data.sources.map(s => `<span class="src-chip">${escapeHtml(s)}</span>`).join("");
             let confHtml = "";
-            if (data.confidence_score !== undefined && data.confidence_score > -900) {
+            if (data.confidence_score !== undefined && data.confidence_score >= 0.0) {
                 confHtml = `<span class="conf-chip">Confidence: ${data.confidence_score.toFixed(2)}</span>`;
             }
             sourcesHtml = `
-                <div class="sources-bar">
-                    <span>📄 Sources:</span>
-                    ${chips}
-                    ${confHtml}
-                </div>
+                <details class="sources-details">
+                    <summary class="sources-summary">
+                        <span>📄 View Evidence & Sources (${data.sources.length})</span>
+                        ${confHtml}
+                    </summary>
+                    <div class="sources-chips">
+                        ${chips}
+                    </div>
+                </details>
             `;
         }
 
+        const attrRawAnswer = (data.answer || "").replace(/<\/?(?:details|summary)[^>]*>/gi, "");
         row.innerHTML = `
             <div class="msg-avatar">AI</div>
             <div class="msg-bubble-wrapper">
                 ${badgeHtml}
-                <div class="msg-bubble" data-raw-answer="${escapeHtml(data.answer)}">
+                <div class="msg-bubble" data-raw-answer="${escapeHtml(attrRawAnswer)}">
                     ${structuredCardsHtml}
                     <div class="answer-content">${formattedAnswer}</div>
                     ${sourcesHtml}
@@ -477,51 +874,412 @@ document.addEventListener("DOMContentLoaded", () => {
         `;
     }
 
-    function renderBudgetCard(meta) {
+    function renderBudgetCard(meta, isItineraryWithBudget = false) {
         const total = meta.calculated_total || {};
-        let totalStr = "₹0";
-        const isZeroCost = (total.min === 0 && total.max === 0) || (total.min === undefined && total.max === undefined);
-        if (total.min !== undefined && total.max !== undefined) {
-            totalStr = total.min === total.max 
-                ? `₹${total.min.toLocaleString()}` 
-                : `₹${total.min.toLocaleString()} – ₹${total.max.toLocaleString()}`;
+        const params = meta.parameters || {};
+        const pax = params.pax || meta.pax || 1;
+        const adults = params.adults !== undefined ? params.adults : meta.adults;
+        const children = params.children !== undefined ? params.children : meta.children;
+        const seniors = params.seniors !== undefined ? params.seniors : (params.senior_citizens !== undefined ? params.senior_citizens : (meta.seniors !== undefined ? meta.seniors : meta.senior_citizens));
+        let paxParts = [];
+        if (adults !== undefined && adults !== null) {
+            paxParts.push(`${adults} Adult${adults === 1 ? '' : 's'}`);
         }
-        const pax = meta.parameters ? meta.parameters.pax : 1;
-        const verifiedCount = meta.verified_item_count || 0;
-        const costLabel = isZeroCost ? "Temple Entry & Darshan (Free)" : "Verified Entry / Darshan / Seva Cost";
+        if (children !== undefined && children !== null) {
+            paxParts.push(`${children} ${children === 1 ? 'Child' : 'Children'}`);
+        }
+        if (seniors !== undefined && seniors !== null) {
+            paxParts.push(`${seniors} Senior Citizen${seniors === 1 ? '' : 's'}`);
+        }
+        let paxStr = `${pax} Pilgrim(s)`;
+        if (paxParts.length > 0) {
+            paxStr = `${pax} Pilgrim(s) (${paxParts.join(', ')})`;
+        }
+        const days = params.days || 1;
+        const nights = params.nights !== undefined ? params.nights : (params.is_day_trip ? 0 : Math.max(0, days - 1));
+        const durStr = params.is_day_trip ? "1 Day (Day Trip)" : `${days} Day(s), ${nights} Night(s)`;
+        const orig = params.origin || "Hyderabad";
+        const dest = params.destination || "Temple";
+        const blim = params.budget_limit;
+        const status = meta.budget_status || "ESTIMATED_WITHIN_BUDGET";
+
+        const selectedTotal = (meta.selected_plan && meta.selected_plan.total !== undefined)
+            ? meta.selected_plan.total
+            : (total.selected_feasible_total !== undefined ? total.selected_feasible_total : (total.min !== undefined ? total.min : 0));
+        const remaining = (blim !== null && blim !== undefined) ? (blim - selectedTotal) : null;
+
+        let totalStr = `₹${selectedTotal.toLocaleString()}`;
+        let totalSubtext = "";
+        if (meta.is_cross_limit && total.min !== undefined && total.max !== undefined) {
+            totalSubtext = `<div style="font-size: 11px; color: #fbbf24; margin-top: 3px;">⚠️ Full Range: ₹${total.min.toLocaleString()} – ₹${total.max.toLocaleString()} (Higher-tier options reach up to ₹${total.max.toLocaleString()})</div>`;
+        } else if (total.min !== undefined && total.max !== undefined && total.min !== total.max) {
+            totalStr = `₹${total.min.toLocaleString()} – ₹${total.max.toLocaleString()}`;
+        }
+
+        let statusClass = "budget-status-within";
+        let statusLabel = "✅ Within Budget";
+        if (remaining !== null && remaining < 0) {
+            statusClass = "budget-status-over";
+            statusLabel = "⚠️ Over Budget";
+        } else if (status === "OVER_BUDGET") {
+            statusClass = "budget-status-over";
+            statusLabel = "⚠️ Over Budget";
+        } else if (status === "CANNOT_VERIFY") {
+            statusClass = "budget-status-unverified";
+            statusLabel = "❓ Unverified Pricing";
+        } else if (meta.origin_assumed || meta.is_preliminary_origin) {
+            statusClass = "budget-status-unverified";
+            statusLabel = "ℹ️ Partial On-Site Baseline (Origin Pending)";
+        } else if (meta.is_cross_limit) {
+            statusClass = "budget-status-within";
+            statusLabel = "✅ Within Budget (Low-Cost Option)";
+        }
+
+        const items = meta.line_items || [];
+        let itemsRows = "";
+        if (items.length > 0) {
+            itemsRows = items.map(it => {
+                let cVal = it.subtotal_min !== undefined ? it.subtotal_min : it.min_cost;
+                let isPendingOrigin = (it.category === "travel" || (it.item_name && it.item_name.includes("Intercity"))) && (it.provenance === "UNAVAILABLE" || (it.item_name && it.item_name.includes("Starting Location Unspecified")));
+                let isUnquantified = !isPendingOrigin && (it.provenance === "UNAVAILABLE" || it.is_quantified === false || cVal === null || (it.item_name && it.item_name.includes("Tariff Unlisted")));
+
+                let isDayTripStay = it.category === "accommodation" && (
+                    (it.quantity_desc && it.quantity_desc.toLowerCase().includes("no overnight stay")) ||
+                    (it.notes && it.notes.toLowerCase().includes("single-day")) ||
+                    (meta.canonical_nights === 0 || meta.nights === 0 || (meta.days === 1 && !meta.canonical_nights))
+                );
+                let isNotSelectedStay = it.category === "accommodation" && (
+                    (it.notes && it.notes.toLowerCase().includes("not selected")) ||
+                    (it.quantity_desc && it.quantity_desc.toLowerCase().includes("not selected"))
+                );
+
+                let cStr;
+                if (isPendingOrigin) {
+                    cStr = "Pending starting location";
+                } else if (isDayTripStay) {
+                    cStr = "Not required";
+                } else if (isNotSelectedStay) {
+                    cStr = "Not selected";
+                } else if (isUnquantified) {
+                    cStr = "Tariff unlisted";
+                } else if (it.is_free) {
+                    cStr = "FREE";
+                } else if (it.subtotal_min === 0 && it.subtotal_max === 0) {
+                    cStr = it.category === "accommodation" ? "Not required" : "FREE";
+                } else if (it.subtotal_min !== it.subtotal_max && it.subtotal_max) {
+                    cStr = `₹${Number(it.subtotal_min).toLocaleString()} <span style="font-size: 10px; color: var(--text-muted); font-weight: normal;">(Range: ₹${Number(it.subtotal_min).toLocaleString()} – ₹${Number(it.subtotal_max).toLocaleString()})</span>`;
+                } else {
+                    cStr = `₹${Number(cVal).toLocaleString()}`;
+                }
+
+                let cleanName = it.item_name || "Expense";
+                if (cleanName.includes("Circuit Intercity Travel")) cleanName = "Intercity Transportation (Bus/Train)";
+                else if (cleanName.includes("Local Sightseeing")) cleanName = "Local Transportation & Sightseeing Transit";
+                else if (cleanName.includes("Meals")) cleanName = "Meals & Refreshments (Vegetarian)";
+                else if (cleanName.includes("General Darshan") && !cleanName.includes(" — ")) cleanName = "General Darshan (Temple Sanctum)";
+                else if (cleanName.includes("Accommodation") && meta.is_cross_limit) cleanName = `${cleanName} (Standard Non-AC)`;
+
+                let evClass = "evidence-estimate";
+                let evLabel = "Estimated";
+                if (isPendingOrigin) {
+                    evClass = "evidence-pending";
+                    evLabel = "Pending confirmation";
+                } else if (isUnquantified) {
+                    evClass = "evidence-estimate";
+                    evLabel = "Pending confirmation";
+                } else if (it.is_free || (it.subtotal_min === 0 && it.subtotal_max === 0)) {
+                    evClass = "evidence-listed";
+                    evLabel = "Complimentary";
+                } else if (it.provenance === "ESTIMATE") {
+                    evClass = "evidence-estimate";
+                    evLabel = "Estimated benchmark";
+                } else if (it.subtotal_min !== it.subtotal_max && it.subtotal_max) {
+                    evClass = "evidence-estimate";
+                    evLabel = "Estimated (Fare range)";
+                } else if (it.provenance === "LISTED_PRICE" || it.provenance === "VERIFIED") {
+                    evClass = "evidence-listed";
+                    evLabel = "Listed price";
+                }
+
+                return `
+                    <tr>
+                        <td><strong>${escapeHtml(cleanName)}</strong></td>
+                        <td style="color: var(--text-muted);">${escapeHtml(it.quantity_desc || it.unit || "Standard option")}</td>
+                        <td style="font-weight: 700; color: #f1f5f9;">${cStr}</td>
+                    </tr>
+                `;
+            }).join("");
+        }
+
+        // Accommodation comparison & alternatives block
+        let accomSectionHtml = "";
+        const accomByTemple = meta.accommodation_options;
+        if (accomByTemple && typeof accomByTemple === "object" && Object.keys(accomByTemple).length > 0) {
+            let templeCards = "";
+            for (const [tName, opts] of Object.entries(accomByTemple)) {
+                const isBalkampet = tName.toLowerCase().includes("balkampet");
+                let optListHtml = "";
+                if (Array.isArray(opts) && opts.length > 0) {
+                    optListHtml = opts.map(o => {
+                        // 1. Price badge: green for numeric tariffs, subtle for unlisted
+                        const rawPrice = o.price || "";
+                        const hasNumericPrice = /\d/.test(rawPrice) && !rawPrice.toLowerCase().includes("contact") && !rawPrice.toLowerCase().includes("unlisted");
+                        const priceHtml = hasNumericPrice
+                            ? `<span style="color: #6ee7b7; font-weight: 700; font-size: 12px;">${escapeHtml(rawPrice)}</span>`
+                            : `<span style="color: #94a3b8; font-weight: 600; font-size: 11px;">${escapeHtml(rawPrice || "Tariff on request")}</span>`;
+
+                        // 2. Property & Management Pill
+                        let mgmtBadge = "";
+                        if (o.management_type === "TEMPLE_MANAGED") {
+                            mgmtBadge = `<span style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600;">🛕 Temple Devasthanam</span>`;
+                        } else if (o.management_type === "GOVERNMENT_TOURISM") {
+                            mgmtBadge = `<span style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600;">🏛️ Telangana Tourism</span>`;
+                        } else if (o.management_type === "COMMUNITY") {
+                            mgmtBadge = `<span style="background: rgba(147, 51, 234, 0.15); color: #c084fc; border: 1px solid rgba(147, 51, 234, 0.3); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 600;">🤝 Community Satram</span>`;
+                        } else {
+                            const subType = o.property_type || o.type || "Stay";
+                            mgmtBadge = `<span style="background: rgba(148, 163, 184, 0.12); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.25); border-radius: 4px; padding: 1px 6px; font-size: 10px; font-weight: 500;">🏨 ${escapeHtml(subType)}</span>`;
+                        }
+
+                        // 3. Contact & Action Buttons
+                        let actionButtons = [];
+                        if (o.phone) {
+                            const telClean = o.phone.replace(/[^0-9+]/g, '');
+                            actionButtons.push(`<a href="tel:${escapeHtml(telClean)}" style="display: inline-flex; align-items: center; gap: 4px; background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 4px; padding: 3px 8px; font-size: 11px; text-decoration: none; font-weight: 600;" title="Call ${escapeHtml(o.phone)}">📞 ${escapeHtml(o.phone)}</a>`);
+                        }
+                        if (o.booking_url) {
+                            actionButtons.push(`<a href="${escapeHtml(o.booking_url)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 4px; padding: 3px 8px; font-size: 11px; text-decoration: none; font-weight: 600;">🌐 Official Booking</a>`);
+                        } else if (o.website_url) {
+                            actionButtons.push(`<a href="${escapeHtml(o.website_url)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 4px; background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 4px; padding: 3px 8px; font-size: 11px; text-decoration: none; font-weight: 500;">🌐 Official Portal</a>`);
+                        }
+                        if (!o.phone && !o.booking_url && !o.website_url) {
+                            if (o.management_type === "TEMPLE_MANAGED") {
+                                actionButtons.push(`<span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(245, 158, 11, 0.1); color: #fde68a; border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 4px; padding: 3px 8px; font-size: 11px;">🛕 Contact temple administration</span>`);
+                            } else {
+                                actionButtons.push(`<span style="display: inline-flex; align-items: center; gap: 4px; color: var(--text-muted); font-size: 11px;">ℹ️ Contact details unavailable</span>`);
+                            }
+                        }
+
+                        // In-app map action
+                        const mapTargetQuery = encodeURIComponent(`${o.name} ${tName || ""}`);
+                        const mapUrl = `https://www.google.com/maps/search/?api=1&query=${mapTargetQuery}`;
+                        actionButtons.push(`<a href="${mapUrl}" class="in-app-map-action" data-maps-url="${mapUrl}" onclick="handleInAppMapLinkClick(event, this)" style="display: inline-flex; align-items: center; gap: 4px; background: rgba(255, 255, 255, 0.05); color: #e2e8f0; border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 4px; padding: 3px 8px; font-size: 11px; text-decoration: none; cursor: pointer;">🗺️ In-App Map</a>`);
+
+                        // 4. Availability alert
+                        const availHtml = o.availability_status
+                            ? `<div style="font-size: 11px; color: #f87171; margin-top: 3px; font-weight: 500;">⚠️ Availability: ${escapeHtml(o.availability_status)}</div>`
+                            : "";
+
+                        return `
+                            <div class="accom-stay-card" style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.07); border-radius: 6px; padding: 8px 12px; margin-bottom: 6px;">
+                                <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px;">
+                                    <strong style="color: #f1f5f9; font-size: 12.5px;">${escapeHtml(o.name)}</strong>
+                                    ${priceHtml}
+                                </div>
+                                <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                                    <span>📍 ${escapeHtml(o.distance)}</span>
+                                    ${mgmtBadge}
+                                </div>
+                                ${availHtml}
+                                ${o.description ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 4px; line-height: 1.4;">${escapeHtml(o.description)}</div>` : ""}
+                                <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; align-items: center;">
+                                    ${actionButtons.join("")}
+                                </div>
+                            </div>
+                        `;
+                    }).join("");
+                } else {
+                    optListHtml = `<div style="font-size: 11.5px; color: var(--text-muted);">Standard budget lodges and private hotels available nearby; confirm tariffs at reception.</div>`;
+                }
+                templeCards += `
+                    <div style="margin-top: 8px;">
+                        <div style="font-size: 12px; font-weight: 700; color: #fde68a; margin-bottom: 4px;">🛕 ${escapeHtml(tName)} Stays:</div>
+                        ${isBalkampet ? `<div style="font-size: 11px; color: #94a3b8; margin-bottom: 5px; font-style: italic;">(Note: Stays located in adjacent Ameerpet / SR Nagar; no on-site Devasthanam choultry exists at Balkampet shrine).</div>` : ""}
+                        ${optListHtml}
+                    </div>
+                `;
+            }
+            accomSectionHtml = `
+                <div class="budget-confs-box" style="margin-top: 12px; background: rgba(30, 41, 59, 0.4); border-left: 3px solid #38bdf8; padding: 10px 14px; border-radius: 6px;">
+                    <strong style="color: #7dd3fc; font-size: 12.5px;">🏨 Accommodation Comparison & Suggestions:</strong>
+                    ${templeCards}
+                </div>
+            `;
+        }
+
+        let broaderNoticeHtml = "";
+        if (meta.is_cross_limit && meta.broader_range && meta.broader_range.exceeds_budget) {
+            broaderNoticeHtml = `
+                <div class="budget-confs-box" style="border-left: 3px solid #f59e0b; background: rgba(245, 158, 11, 0.08); margin-top: 12px; padding: 10px 14px; border-radius: 6px;">
+                    <strong style="color: #fbbf24; font-size: 12.5px;">⚠️ Cost Range Advisory:</strong>
+                    <div style="font-size: 11.5px; color: #fde68a; margin-top: 4px;">
+                        The selected baseline plan of ₹${selectedTotal.toLocaleString()} ${(meta.origin_assumed || meta.is_preliminary_origin) ? `leaves an arithmetic remainder of ₹${remaining !== null ? remaining.toLocaleString() : ""} before intercity transport and other unconfirmed costs against your ₹${blim ? blim.toLocaleString() : ""} budget (this remainder is NOT guaranteed spendable surplus).` : `fits within your ₹${blim ? blim.toLocaleString() : ""} budget (Estimated remaining: ₹${remaining !== null ? remaining.toLocaleString() : ""}).`}
+                        Higher-tier choices (such as AC rooms or private cabs) reach up to ₹${meta.broader_range.max.toLocaleString()}, exceeding this limit by ₹${meta.broader_range.excess_amount.toLocaleString()}. Choose the baseline options above to stay within budget.
+                    </div>
+                </div>
+            `;
+        }
+
+        const confs = meta.confirmation_required || [];
+        let confsHtml = "";
+        if (confs.length > 0) {
+            const confList = confs.map(c => `<li>${escapeHtml(c)}</li>`).join("");
+            confsHtml = `
+                <div class="budget-confs-box" style="margin-top: 10px; padding: 8px 12px; border-radius: 6px;">
+                    <strong style="font-size: 11.5px; color: #fde68a;">ℹ️ Fares & Tariffs Requiring Live Confirmation Before Departure:</strong>
+                    <ul style="margin: 4px 0 0 16px; padding: 0; font-size: 11px; color: #cbd5e1;">${confList}</ul>
+                </div>
+            `;
+        }
 
         return `
             <div class="structured-card budget-card">
-                <div class="budget-total-bar">
+                <div class="budget-header-row">
                     <div>
-                        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;">${costLabel}</div>
+                        <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Your ${days}-Day Pilgrimage Budget</div>
                         <div class="budget-total-val">${totalStr}</div>
+                        ${meta.broader_range && meta.broader_range.min !== meta.broader_range.max ? `<div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">Consistent Cost Range: ₹${meta.broader_range.min.toLocaleString()} – ₹${meta.broader_range.max.toLocaleString()}</div>` : ""}
+                        ${totalSubtext}
                     </div>
-                    <div style="text-align: right;">
-                        <span style="font-size: 11px; background: rgba(16, 185, 129, 0.15); color: var(--accent-emerald); padding: 2px 8px; border-radius: 12px; font-weight: 600;">
-                            ${verifiedCount} Verified Tariff(s)
-                        </span>
+                    <div>
+                        <span class="budget-status-pill ${statusClass}">${statusLabel}</span>
                     </div>
                 </div>
-                <div class="budget-tags">
-                    <span>👥 Group: ${pax} Pilgrim(s)</span>
-                    <span>•</span>
-                    <span>${isZeroCost ? "General entry is free; optional special sevas/transport extra" : "Static verified temple records"}</span>
+                <div class="budget-metrics-grid">
+                    ${blim ? `
+                    <div class="budget-metric-box">
+                        <div class="label">Budget Cap</div>
+                        <div class="val">🎯 ₹${blim.toLocaleString()}</div>
+                    </div>
+                    ` : ""}
+                    <div class="budget-metric-box">
+                        <div class="label">Selected Low-Cost Estimate</div>
+                        <div class="val" style="color: #6ee7b7; font-weight: 700;">₹${selectedTotal.toLocaleString()}</div>
+                    </div>
+                    ${remaining !== null ? `
+                    <div class="budget-metric-box">
+                        <div class="label">${(meta.origin_assumed || meta.is_preliminary_origin) ? "Arithmetic Remainder (Pre-Transit)" : (remaining >= 0 ? "Estimated Remaining" : "Estimated Shortfall")}</div>
+                        <div class="val" style="color: ${remaining >= 0 ? '#34d399' : '#f87171'}; font-weight: 700;">
+                            ${(meta.origin_assumed || meta.is_preliminary_origin) ? `₹${remaining.toLocaleString()} (Pending Transit)` : (remaining >= 0 ? `💰 ₹${remaining.toLocaleString()}` : `⚠️ ₹${Math.abs(remaining).toLocaleString()}`)}
+                        </div>
+                    </div>
+                    ` : ""}
+                    <div class="budget-metric-box">
+                        <div class="label">Travellers</div>
+                        <div class="val">👥 ${escapeHtml(paxStr)}</div>
+                    </div>
+                    <div class="budget-metric-box">
+                        <div class="label">Duration</div>
+                        <div class="val">📅 ${escapeHtml(durStr)}</div>
+                    </div>
+                    <div class="budget-metric-box">
+                        <div class="label">Destinations</div>
+                        <div class="val">🛕 ${escapeHtml(dest)}</div>
+                    </div>
                 </div>
+                ${itemsRows ? `
+                <div class="budget-table-wrapper">
+                    <table class="budget-table">
+                        <thead>
+                            <tr>
+                                <th>Expense Category</th>
+                                <th>Selected Option & Basis</th>
+                                <th>Estimated Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${itemsRows}
+                        </tbody>
+                    </table>
+                </div>
+                ` : ""}
+                ${isItineraryWithBudget ? "" : accomSectionHtml}
+                ${broaderNoticeHtml}
+                ${confsHtml}
             </div>
         `;
     }
 
+    let latestNavigationMeta = null;
+
     function renderNavigationCard(meta) {
+        latestNavigationMeta = meta;
+
+        // P0: If origin is missing, render interactive starting-point prompt card
+        if (meta.missing_origin) {
+            const dest = meta.destination || "Temple";
+            const formId = "navClarifyForm_" + Math.random().toString(36).substring(2, 7);
+            const safeDest = escapeHtml(dest).replace(/'/g, "\\'");
+            return `
+                <div class="nav-clarification-card">
+                    <div class="nav-clarification-header">
+                        <span class="nav-clarification-icon">🧭</span>
+                        <h4>Where are you starting from?</h4>
+                    </div>
+                    <p class="nav-clarification-text">Enter your starting location to see the route to <strong>${escapeHtml(dest)}</strong>.</p>
+                    <form id="${formId}" class="nav-clarification-form" onsubmit="event.preventDefault(); submitNavOrigin('${formId}', '${safeDest}');">
+                        <div class="nav-clarification-inputs">
+                            <div class="nav-input-wrapper">
+                                <input type="text" id="${formId}_origin" class="nav-clarification-input" placeholder="e.g. Hyderabad, Warangal, Secunderabad Station" autocomplete="off" required>
+                                <button type="button" class="btn-clarify-gps" title="Use device location" onclick="useCurrentLocationForNav('${formId}_origin')">📍</button>
+                            </div>
+                            <select id="${formId}_mode" class="nav-clarification-select">
+                                <option value="driving" selected>🚗 Driving</option>
+                                <option value="transit">🚌 Transit</option>
+                                <option value="two_wheeler">🛵 Two-Wheeler</option>
+                                <option value="walking">🚶 Walking</option>
+                            </select>
+                            <button type="submit" class="btn-clarification-submit">
+                                Get Route ➔
+                            </button>
+                        </div>
+                    </form>
+                </div>
+            `;
+        }
+
         const orig = meta.origin || "Origin";
         const dest = meta.destination || "Destination";
         const origCanon = meta.origin_canonical || "";
         const destCanon = meta.destination_canonical || "";
-        const dist = meta.distance_km !== null && meta.distance_km !== undefined ? `${meta.distance_km} km` : "N/A";
-        const dur = meta.duration_minutes !== null && meta.duration_minutes !== undefined ? `${Math.round(meta.duration_minutes)} min` : "N/A";
-        const traffic = meta.traffic_duration_minutes !== null && meta.traffic_duration_minutes !== undefined 
-            ? `${Math.round(meta.traffic_duration_minutes)} min (traffic)` 
-            : null;
+
+        const hasRoute = (meta.distance_km !== null && meta.distance_km !== undefined && meta.distance_km > 0) && (meta.polyline && meta.polyline.length > 5);
+        const googleMapsDirUrl = `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(orig)}&destination=${encodeURIComponent(dest)}&travelmode=${encodeURIComponent(meta.travel_mode || 'driving')}`;
+
+        if (!hasRoute) {
+            return `
+                <div class="structured-card nav-card" style="border-left: 3px solid #ef4444;">
+                    <div class="nav-route-row">
+                        <span>⚠️</span>
+                        <span>Route Unavailable: ${escapeHtml(orig)} ➔ ${escapeHtml(dest)}</span>
+                    </div>
+                    <div style="font-size: 12px; color: var(--text-muted); margin: 6px 0;">
+                        Live road route geometry could not be calculated between these locations. You can view directions directly in Google Maps:
+                    </div>
+                    <div style="margin-top: 6px;">
+                        <a href="${googleMapsDirUrl}" target="_blank" rel="noopener noreferrer" class="nav-btn-external-map">
+                            ↗️ Open Directions in Google Maps
+                        </a>
+                    </div>
+                </div>
+            `;
+        }
+
+        let dist = `${meta.distance_km} km`;
+        let dur = "Unavailable";
+        if (meta.duration_minutes !== null && meta.duration_minutes !== undefined && meta.duration_minutes > 0) {
+            dur = formatDurationHoursMinutes(meta.duration_minutes) || "Unavailable";
+        }
+
+        let traffic = null;
+        if (meta.traffic_duration_minutes !== null && meta.traffic_duration_minutes !== undefined && meta.traffic_duration_minutes > 0) {
+            const formattedTraffic = formatDurationHoursMinutes(meta.traffic_duration_minutes);
+            if (formattedTraffic) {
+                traffic = `${formattedTraffic} (traffic)`;
+            }
+        }
+
+        const modeIcon = meta.travel_mode === "transit" ? "🚌 Transit" : (meta.travel_mode === "two_wheeler" ? "🛵 Two-Wheeler" : (meta.travel_mode === "walking" ? "🚶 Walking" : "🚗 Driving"));
 
         const safeOrig = escapeHtml(orig).replace(/'/g, "\\'");
         const safeDest = escapeHtml(dest).replace(/'/g, "\\'");
@@ -535,27 +1293,67 @@ document.addEventListener("DOMContentLoaded", () => {
                     <span>${escapeHtml(orig)}</span>
                     <span style="color: var(--accent-gold);">➔</span>
                     <span>${escapeHtml(dest)}</span>
+                    <span class="nav-mode-badge" style="margin-left: 8px; font-size: 11px; padding: 2px 7px; background: rgba(251, 191, 36, 0.15); border-radius: 6px; color: var(--accent-gold);">${modeIcon}</span>
                 </div>
                 <div class="nav-metrics">
                     <div class="nav-metric-item"><strong>Distance:</strong> ${dist}</div>
                     <div class="nav-metric-item"><strong>Duration:</strong> ${dur}</div>
                     ${traffic ? `<div class="nav-metric-item" style="color: var(--accent-gold);"><strong>Live Traffic:</strong> ${traffic}</div>` : ""}
                 </div>
-                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
-                    <span style="font-size: 10.5px; color: var(--text-muted);">Source: Google Maps Routes API</span>
-                    <button class="nav-btn-view-map" 
-                            id="viewRouteBtn"
-                            data-origin="${escapeHtml(orig)}" 
-                            data-destination="${escapeHtml(dest)}" 
-                            data-origin-canonical="${escapeHtml(origCanon)}" 
-                            data-destination-canonical="${escapeHtml(destCanon)}"
-                            onclick="handleViewRouteClick(this, '${safeOrig}', '${safeDest}', '${safeOrigCanon}', '${safeDestCanon}')">
-                        🗺️ View Route on Map
-                    </button>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 8px; flex-wrap: wrap; gap: 8px;">
+                    <span style="font-size: 10.5px; color: var(--text-muted);">Source: ${escapeHtml(meta.provider || 'Google Maps Routes API')}</span>
+                    <div style="display: flex; gap: 6px; align-items: center;">
+                        <a href="${googleMapsDirUrl}" target="_blank" rel="noopener noreferrer" class="nav-btn-external-map">
+                            ↗️ Google Maps
+                        </a>
+                        <button class="nav-btn-view-map" 
+                                id="viewRouteBtn"
+                                data-origin="${escapeHtml(orig)}" 
+                                data-destination="${escapeHtml(dest)}" 
+                                data-origin-canonical="${escapeHtml(origCanon)}" 
+                                data-destination-canonical="${escapeHtml(destCanon)}"
+                                data-polyline="${escapeHtml(meta.polyline || '')}"
+                                data-origin-coords="${escapeHtml(JSON.stringify(meta.origin_coordinates || []))}"
+                                data-dest-coords="${escapeHtml(JSON.stringify(meta.destination_coordinates || []))}"
+                                onclick="handleViewRouteClick(this, '${safeOrig}', '${safeDest}', '${safeOrigCanon}', '${safeDestCanon}')">
+                            🗺️ View Route on Map
+                        </button>
+                    </div>
                 </div>
             </div>
         `;
     }
+
+    window.submitNavOrigin = function(formId, dest) {
+        const input = document.getElementById(`${formId}_origin`);
+        const modeSelect = document.getElementById(`${formId}_mode`);
+        if (!input || !input.value.trim()) return;
+        const origin = input.value.trim();
+        const mode = modeSelect ? modeSelect.value : "driving";
+        sendPrompt(`${origin} to ${dest} ${mode}`);
+    };
+
+    window.useCurrentLocationForNav = function(inputId) {
+        const input = document.getElementById(inputId);
+        if (!input) return;
+        if (navigator.geolocation) {
+            input.placeholder = "Detecting current location...";
+            navigator.geolocation.getCurrentPosition(
+                (pos) => {
+                    const lat = pos.coords.latitude.toFixed(5);
+                    const lng = pos.coords.longitude.toFixed(5);
+                    input.value = `${lat}, ${lng}`;
+                },
+                (err) => {
+                    input.placeholder = "Enter starting location";
+                    alert("Location permission denied or unavailable. Please enter your starting city or landmark manually.");
+                },
+                { timeout: 5000 }
+            );
+        } else {
+            alert("Geolocation is not supported by your browser. Please enter your starting city manually.");
+        }
+    };
 
     function renderItineraryCard(meta) {
         const temples = meta.temples || [];
@@ -601,7 +1399,19 @@ document.addEventListener("DOMContentLoaded", () => {
         "chennai": { lat: 13.0827, lng: 80.2707, name: "Chennai" },
         "mumbai": { lat: 19.0760, lng: 72.8777, name: "Mumbai" },
         "delhi": { lat: 28.6139, lng: 77.2090, name: "Delhi" },
-        "pune": { lat: 18.5204, lng: 73.8567, name: "Pune" }
+        "pune": { lat: 18.5204, lng: 73.8567, name: "Pune" },
+        "palvancha": { lat: 17.5988, lng: 80.7064, name: "Palvancha" },
+        "palwancha": { lat: 17.5988, lng: 80.7064, name: "Palvancha" },
+        "kothagudem": { lat: 17.5487, lng: 80.6178, name: "Kothagudem" },
+        "bhadrachalam": { lat: 17.6688, lng: 80.8936, name: "Bhadrachalam" },
+        "kaleshwaram": { lat: 18.8122, lng: 79.9075, name: "Kaleshwaram" },
+        "medaram": { lat: 18.2368, lng: 80.2858, name: "Medaram" },
+        "basara": { lat: 18.9754, lng: 77.9542, name: "Basara" },
+        "vemulawada": { lat: 18.4682, lng: 78.8687, name: "Vemulawada" },
+        "yadagirigutta": { lat: 17.5886, lng: 78.9392, name: "Yadagirigutta" },
+        "srisailam": { lat: 16.0745, lng: 78.8682, name: "Srisailam" },
+        "alampur": { lat: 15.8797, lng: 78.1325, name: "Alampur" },
+        "dharmapuri": { lat: 18.9486, lng: 79.0911, name: "Dharmapuri" }
     };
 
     const CANONICAL_TEMPLE_ALIASES = {
@@ -622,6 +1432,44 @@ document.addEventListener("DOMContentLoaded", () => {
         "srisaila": "Srisaila"
     };
 
+    function isLikelyTempleName(clean, canonicalHint) {
+        if (!clean && !canonicalHint) return false;
+        const c = String(clean || "").toLowerCase();
+        const canon = String(canonicalHint || "").toLowerCase();
+
+        // Explicit non-temple keywords
+        const nonTempleWords = [
+            "railway station", "railway", "station", "bus stand", "bus stop",
+            "airport", "hotel", "resort", "restaurant", "cafe", "bhavan", "lodge",
+            "hospital", "college", "school", "office", "street", "road", "colony",
+            "nagar", "circle", "junction", "cross road", "crossroad", "bypass", "highway"
+        ];
+        if (nonTempleWords.some(w => c.includes(w))) return false;
+
+        // Check if it's an exact known city/town
+        if (KNOWN_REGIONAL_COORDINATES[c]) return false;
+
+        // Explicit temple keywords
+        const templeWords = [
+            "temple", "mandir", "devasthanam", "gudi", "kovil", "shrine",
+            "dargah", "devalayam", "sannidhi", "sanctuary", "jyotirlinga", "shakti peeth"
+        ];
+        if (templeWords.some(w => c.includes(w) || canon.includes(w))) return true;
+
+        // Specific deity / distinctive temple identifiers
+        const deityWords = [
+            "saraswathi", "gnana saraswathi", "yellamma", "balkampet",
+            "chilkur balaji", "chilkur", "jogulamba", "mallikarjuna",
+            "bhramaramba", "rajarajeshwara", "rajanna", "mukteshwara",
+            "kaleshwara", "sammakka", "saralamma", "ramalingeswara",
+            "thousand pillar", "rudreswara", "veera satyanarayana",
+            "annavaram", "surendrapuri", "karmanghat", "sanghi", "birla mandir", "ahobilam"
+        ];
+        if (deityWords.some(w => c.includes(w) || canon.includes(w))) return true;
+
+        return false;
+    }
+
     function resolveLocationForMap(locationStr, canonicalHint) {
         if (!locationStr && !canonicalHint) return null;
         if (typeof locationStr === "object" && locationStr.lat && locationStr.lng) {
@@ -632,56 +1480,118 @@ document.addEventListener("DOMContentLoaded", () => {
         const clean = raw.toLowerCase().replace(/^(the|a|an)\s+/i, "").replace(/[?!.,;]+$/, "").trim();
         const canonClean = String(canonicalHint || "").toLowerCase().trim();
 
-        // 1. Check canonicalHint in verified templeCoordinates (Priority 1)
-        if (canonClean && Array.isArray(templeCoordinates) && templeCoordinates.length > 0) {
-            const foundCanon = templeCoordinates.find(t => t.canonical_name && t.canonical_name.toLowerCase() === canonClean);
-            if (foundCanon) {
-                return { lat: foundCanon.latitude, lng: foundCanon.longitude, name: foundCanon.display_name, isTemple: true };
-            }
-        }
-
-        // 2. Check alias map
-        for (const [alias, canonicalTarget] of Object.entries(CANONICAL_TEMPLE_ALIASES)) {
-            if (clean === alias || clean.includes(alias)) {
-                const found = templeCoordinates.find(t => t.canonical_name && t.canonical_name.toLowerCase() === canonicalTarget.toLowerCase());
-                if (found) {
-                    return { lat: found.latitude, lng: found.longitude, name: found.display_name, isTemple: true };
-                }
-            }
-        }
-
-        // 3. Check clean in verified templeCoordinates (Priority 2)
-        if (Array.isArray(templeCoordinates) && templeCoordinates.length > 0) {
-            // A. Exact canonical_name
-            let found = templeCoordinates.find(t => t.canonical_name && t.canonical_name.toLowerCase() === clean);
-            if (found) return { lat: found.latitude, lng: found.longitude, name: found.display_name, isTemple: true };
-
-            // B. Exact display_name
-            found = templeCoordinates.find(t => t.display_name && t.display_name.toLowerCase() === clean);
-            if (found) return { lat: found.latitude, lng: found.longitude, name: found.display_name, isTemple: true };
-
-            // C. Substring/containment match
-            found = templeCoordinates.find(t => {
-                const c = (t.canonical_name || "").toLowerCase();
-                const d = (t.display_name || "").toLowerCase();
-                return (c && clean.includes(c)) || (c && c.includes(clean)) || (d && clean.includes(d)) || (d && d.includes(clean));
-            });
-            if (found) return { lat: found.latitude, lng: found.longitude, name: found.display_name, isTemple: true };
-        }
-
-        // 4. Check known regional cities (Priority 3)
-        if (KNOWN_REGIONAL_COORDINATES[clean]) {
-            const city = KNOWN_REGIONAL_COORDINATES[clean];
-            return { lat: city.lat, lng: city.lng, name: city.name, isTemple: false };
-        }
-        for (const [key, city] of Object.entries(KNOWN_REGIONAL_COORDINATES)) {
-            if (clean.includes(key)) {
+        // 1. Check known regional cities (Priority 1 if input matches regional city and is not explicitly a temple)
+        const isTempleIntent = isLikelyTempleName(clean, canonClean);
+        if (!isTempleIntent) {
+            if (KNOWN_REGIONAL_COORDINATES[clean]) {
+                const city = KNOWN_REGIONAL_COORDINATES[clean];
                 return { lat: city.lat, lng: city.lng, name: city.name, isTemple: false };
             }
         }
 
-        // 5. Fallback: string for DirectionsService geocoding
-        return clean.includes("telangana") || clean.includes("india") ? raw : `${raw}, Telangana, India`;
+        // 2. Check canonicalHint in verified templeCoordinates (Priority 2)
+        if (canonClean && Array.isArray(templeCoordinates) && templeCoordinates.length > 0) {
+            const foundCanon = templeCoordinates.find(t => t.canonical_name && t.canonical_name.toLowerCase() === canonClean);
+            if (foundCanon && isTempleIntent) {
+                return { lat: foundCanon.latitude, lng: foundCanon.longitude, name: foundCanon.display_name, isTemple: true };
+            }
+        }
+
+        // 3. Check alias map ONLY when temple intent is detected
+        if (isTempleIntent) {
+            for (const [alias, canonicalTarget] of Object.entries(CANONICAL_TEMPLE_ALIASES)) {
+                if (clean === alias || clean.includes(alias)) {
+                    const found = templeCoordinates.find(t => t.canonical_name && t.canonical_name.toLowerCase() === canonicalTarget.toLowerCase());
+                    if (found) {
+                        return { lat: found.latitude, lng: found.longitude, name: found.display_name, isTemple: true };
+                    }
+                }
+            }
+
+            // 4. Check clean in verified templeCoordinates
+            if (Array.isArray(templeCoordinates) && templeCoordinates.length > 0) {
+                // A. Exact canonical_name
+                let found = templeCoordinates.find(t => t.canonical_name && t.canonical_name.toLowerCase() === clean);
+                if (found) return { lat: found.latitude, lng: found.longitude, name: found.display_name, isTemple: true };
+
+                // B. Exact display_name
+                found = templeCoordinates.find(t => t.display_name && t.display_name.toLowerCase() === clean);
+                if (found) return { lat: found.latitude, lng: found.longitude, name: found.display_name, isTemple: true };
+
+                // C. Containment match: User input CONTAINS canonical name (e.g. "visit srisailam today")
+                // NEVER check if temple display name contains user input (e.g. "Balkampet Yellamma Temple, Hyderabad" contains "hyderabad")
+                found = templeCoordinates.find(t => {
+                    const c = (t.canonical_name || "").toLowerCase();
+                    return c && c.length > 3 && clean.includes(c);
+                });
+                if (found) return { lat: found.latitude, lng: found.longitude, name: found.display_name, isTemple: true };
+            }
+        }
+
+        // 5. Fallback check for regional cities (if not matched yet)
+        if (KNOWN_REGIONAL_COORDINATES[clean]) {
+            const city = KNOWN_REGIONAL_COORDINATES[clean];
+            return { lat: city.lat, lng: city.lng, name: city.name, isTemple: false };
+        }
+
+        // Return null so geocodeLocationAsync uses Google PlacesService for arbitrary places
+        return null;
+    }
+
+    async function geocodeLocationAsync(locationStr, canonicalHint) {
+        if (!locationStr && !canonicalHint) return null;
+        if (typeof locationStr === "object" && locationStr.lat && locationStr.lng) {
+            return locationStr;
+        }
+
+        // 1. Try local verified coordinates first (temples, regional cities)
+        const localResolved = resolveLocationForMap(locationStr, canonicalHint);
+        if (localResolved && typeof localResolved === "object" && localResolved.lat !== undefined) {
+            return localResolved;
+        }
+
+        const raw = String(locationStr || "").trim();
+        if (!raw) return null;
+
+        // 2. Use browser PlacesService for arbitrary valid destinations (railway stations, hotels, restaurants, landmarks, addresses)
+        if (window.google && google.maps && google.maps.places && google.maps.places.PlacesService) {
+            try {
+                const queryStr = raw.toLowerCase().includes("telangana") || raw.toLowerCase().includes("india")
+                    ? raw
+                    : `${raw}, Telangana, India`;
+
+                const dummy = document.createElement("div");
+                const svc = new google.maps.places.PlacesService(dummy);
+
+                const placesResult = await new Promise((resolve) => {
+                    const timer = setTimeout(() => resolve(null), 3500);
+                    svc.textSearch({ query: queryStr }, (results, status) => {
+                        clearTimeout(timer);
+                        if (status === "OK" && results && results.length > 0) {
+                            const top = results[0];
+                            const loc = top.geometry && top.geometry.location;
+                            if (loc) {
+                                resolve({
+                                    lat: typeof loc.lat === "function" ? loc.lat() : Number(loc.lat),
+                                    lng: typeof loc.lng === "function" ? loc.lng() : Number(loc.lng),
+                                    name: top.name || raw,
+                                    address: top.formatted_address || queryStr,
+                                    isTemple: isLikelyTempleName(top.name || raw)
+                                });
+                                return;
+                            }
+                        }
+                        resolve(null);
+                    });
+                });
+
+                if (placesResult) return placesResult;
+            } catch (placesErr) {
+                console.warn("[PilgrimAI] PlacesService textSearch error:", placesErr);
+            }
+        }
+
+        return null;
     }
 
     function decodePolyline(encoded) {
@@ -735,6 +1645,23 @@ document.addEventListener("DOMContentLoaded", () => {
                 activeRouteMarkers = [];
             }
         } catch (e) {}
+
+        const mapRouteStrip = document.getElementById("mapRouteStrip");
+        if (mapRouteStrip) mapRouteStrip.style.display = "none";
+
+        activeNavigationState = {
+            origin: "",
+            destination: "",
+            travelMode: "driving",
+            distance_km: null,
+            duration_minutes: null,
+            polyline: null,
+            origin_coordinates: null,
+            destination_coordinates: null
+        };
+        window.activeRoutePolyline = null;
+        window.activeRouteMarkers = [];
+        window.activeNavigationState = null;
     }
 
     function formatRoutesWaypoint(resolved) {
@@ -832,6 +1759,7 @@ document.addEventListener("DOMContentLoaded", () => {
             strokeWeight: 6,
             map: googleMap
         });
+        window.activeRoutePolyline = activeRoutePolyline;
 
         // Fit bounds across all points
         const bounds = new google.maps.LatLngBounds();
@@ -849,11 +1777,23 @@ document.addEventListener("DOMContentLoaded", () => {
             ? { lat: Number(destResolved.lat), lng: Number(destResolved.lng) }
             : (routeData.path && routeData.path.length > 0 ? routeData.path[routeData.path.length - 1] : null);
 
+        const origLabel = (origResolved && origResolved.name)
+            || (typeof origResolved === "string" ? origResolved.split(",")[0].trim() : null)
+            || (latestNavigationMeta && latestNavigationMeta.origin)
+            || (activeNavigationState && activeNavigationState.origin)
+            || "Origin";
+
+        const destLabel = (destResolved && destResolved.name)
+            || (typeof destResolved === "string" ? destResolved.split(",")[0].trim() : null)
+            || (latestNavigationMeta && latestNavigationMeta.destination)
+            || (activeNavigationState && activeNavigationState.destination)
+            || "Destination";
+
         if (startPos) {
             const startMarker = new google.maps.Marker({
                 position: startPos,
                 map: googleMap,
-                title: (origResolved && origResolved.name) || "Origin",
+                title: origLabel,
                 label: { text: "A", color: "#fff", fontWeight: "bold" },
                 icon: {
                     path: google.maps.SymbolPath.CIRCLE,
@@ -864,6 +1804,10 @@ document.addEventListener("DOMContentLoaded", () => {
                     strokeWeight: 2
                 }
             });
+            const origInfo = new google.maps.InfoWindow({
+                content: `<div style="color:#0f172a;padding:4px;font-size:12px;"><strong>Starting Point (A):</strong><br>${escapeHtml(origLabel)}</div>`
+            });
+            startMarker.addListener("click", () => origInfo.open(googleMap, startMarker));
             activeRouteMarkers.push(startMarker);
         }
 
@@ -871,7 +1815,7 @@ document.addEventListener("DOMContentLoaded", () => {
             const endMarker = new google.maps.Marker({
                 position: endPos,
                 map: googleMap,
-                title: (destResolved && destResolved.name) || "Destination",
+                title: destLabel,
                 label: { text: "B", color: "#fff", fontWeight: "bold" },
                 icon: {
                     path: google.maps.SymbolPath.CIRCLE,
@@ -882,7 +1826,46 @@ document.addEventListener("DOMContentLoaded", () => {
                     strokeWeight: 2
                 }
             });
+            const destInfo = new google.maps.InfoWindow({
+                content: `<div style="color:#0f172a;padding:4px;font-size:12px;"><strong>Destination (B):</strong><br>${escapeHtml(destLabel)}</div>`
+            });
+            endMarker.addListener("click", () => destInfo.open(googleMap, endMarker));
             activeRouteMarkers.push(endMarker);
+        }
+        window.activeRouteMarkers = activeRouteMarkers;
+
+        // Update active route strip
+        const mapRouteStrip = document.getElementById("mapRouteStrip");
+        const mapRouteSummaryText = document.getElementById("mapRouteSummaryText");
+        if (mapRouteStrip && mapRouteSummaryText) {
+            mapRouteStrip.style.display = "flex";
+            let metrics = "";
+            if (latestNavigationMeta && latestNavigationMeta.distance_km) {
+                metrics += ` • ${latestNavigationMeta.distance_km} km`;
+            }
+            if (latestNavigationMeta && latestNavigationMeta.duration_minutes) {
+                const formattedDur = formatDurationHoursMinutes(latestNavigationMeta.duration_minutes);
+                if (formattedDur) {
+                    metrics += ` (${formattedDur})`;
+                }
+            }
+            mapRouteSummaryText.innerHTML = `<strong>${escapeHtml(origLabel)} ➔ ${escapeHtml(destLabel)}</strong>${metrics}`;
+        }
+
+        // Update route planner inputs
+        const mapOriginInput = document.getElementById("mapOriginInput");
+        const mapDestInput = document.getElementById("mapDestInput");
+        if (mapOriginInput && origResolved && origResolved.name) {
+            const manualOrigin = window.getUserManualOrigin ? window.getUserManualOrigin() : null;
+            if (!manualOrigin || !mapOriginInput.value.trim()) {
+                mapOriginInput.value = origResolved.name;
+            }
+        }
+        if (mapDestInput && destResolved && destResolved.name) {
+            const manualDest = window.getUserManualDestination ? window.getUserManualDestination() : null;
+            if (!manualDest || !mapDestInput.value.trim()) {
+                mapDestInput.value = destResolved.name;
+            }
         }
 
         highlightDestinationTemple(destResolved);
@@ -908,13 +1891,51 @@ document.addEventListener("DOMContentLoaded", () => {
     function handleMapSideEffects(data) {
         const meta = data.metadata || {};
 
-        // 1. Navigation query: highlight route
-        if (data.agent_name === "live_navigation" || meta.distance_km !== undefined) {
-            if (meta.origin && meta.destination) {
+        // 1. Navigation query: highlight route or handle missing origin
+        if (data.agent_name === "live_navigation" || meta.distance_km !== undefined || meta.missing_origin) {
+            if (meta.missing_origin) {
+                const mapDestInput = document.getElementById("mapDestInput");
+                const mapOriginInput = document.getElementById("mapOriginInput");
+                if (mapDestInput && meta.destination) {
+                    mapDestInput.value = meta.destination;
+                }
+                if (mapOriginInput) {
+                    mapOriginInput.placeholder = "Enter starting location to calculate route";
+                }
+            } else if (meta.origin && meta.destination) {
+                const mapOriginInput = document.getElementById("mapOriginInput");
+                const mapDestInput = document.getElementById("mapDestInput");
+                const mapModeSelect = document.getElementById("mapModeSelect");
+                const manualOrigin = window.getUserManualOrigin ? window.getUserManualOrigin() : null;
+                const manualDest = window.getUserManualDestination ? window.getUserManualDestination() : null;
+                if (mapOriginInput && (!manualOrigin || !mapOriginInput.value.trim())) mapOriginInput.value = meta.origin;
+                if (mapDestInput && (!manualDest || !mapDestInput.value.trim())) mapDestInput.value = meta.destination;
+                if (mapModeSelect && meta.travel_mode) mapModeSelect.value = meta.travel_mode;
+
+                activeNavigationState = {
+                    origin: meta.origin,
+                    destination: meta.destination,
+                    travelMode: meta.travel_mode || "driving",
+                    distance_km: meta.distance_km || null,
+                    duration_minutes: meta.duration_minutes || null,
+                    polyline: meta.polyline || null,
+                    origin_coordinates: meta.origin_coordinates || null,
+                    destination_coordinates: meta.destination_coordinates || null
+                };
+
                 setTimeout(() => {
                     const btn = document.getElementById("viewRouteBtn");
-                    focusRouteOnMap(meta.origin, meta.destination, btn, meta.origin_canonical, meta.destination_canonical);
-                }, 50);
+                    focusRouteOnMap(
+                        meta.origin,
+                        meta.destination,
+                        btn,
+                        meta.origin_canonical,
+                        meta.destination_canonical,
+                        meta.polyline,
+                        meta.origin_coordinates,
+                        meta.destination_coordinates
+                    );
+                }, 100);
             }
         }
 
@@ -927,23 +1948,59 @@ document.addEventListener("DOMContentLoaded", () => {
             fetchNearbyPlaces(meta.display_name || meta.location, meta.latitude, meta.longitude);
         }
 
-        // 3. Temple Information query: focus on temple pin
-        if (meta.detected_temple) {
-            const found = templeCoordinates.find(t => t.canonical_name.toLowerCase() === meta.detected_temple.toLowerCase());
+        // 3. Temple Information query / Itinerary / Budget: focus on temple pin and set context
+        let detectedTempleName = meta.detected_temple;
+        if (!detectedTempleName && meta.temple) {
+            detectedTempleName = meta.temple;
+        } else if (!detectedTempleName && Array.isArray(meta.temples) && meta.temples.length > 0) {
+            detectedTempleName = meta.temples[0];
+        } else if (!detectedTempleName && meta.destination_canonical) {
+            detectedTempleName = meta.destination_canonical;
+        }
+
+        if (detectedTempleName) {
+            const cleanTarget = detectedTempleName.toLowerCase();
+            let found = templeCoordinates.find(t => 
+                t.canonical_name.toLowerCase() === cleanTarget ||
+                t.display_name.toLowerCase().includes(cleanTarget)
+            );
+            if (!found) {
+                for (const [alias, canon] of Object.entries(CANONICAL_TEMPLE_ALIASES)) {
+                    if (cleanTarget.includes(alias)) {
+                        found = templeCoordinates.find(t => t.canonical_name.toLowerCase() === canon.toLowerCase());
+                        if (found) break;
+                    }
+                }
+            }
             if (found) {
                 currentSelectedTemple = found.display_name;
                 currentLat = found.latitude;
                 currentLng = found.longitude;
-                panToCoordinates(found.latitude, found.longitude, found.display_name);
+                if (data.agent_name !== "live_navigation") {
+                    panToCoordinates(found.latitude, found.longitude, found.display_name);
+                }
                 fetchNearbyPlaces(found.display_name, found.latitude, found.longitude);
             }
         }
     }
 
-    window.focusRouteOnMap = async function(origin, destination, btn, originCanonical, destCanonical) {
+    window.getMapInstance = () => googleMap;
+    window.getActivePolyline = () => activeRoutePolyline;
+    window.getActiveMarkers = () => activeRouteMarkers;
+    window.getActiveNavigationState = () => activeNavigationState;
+
+    window.focusRouteOnMap = async function(origin, destination, btn, originCanonical, destCanonical, polyline, origCoords, destCoords) {
         if (!origin || !destination) {
             console.warn("[PilgrimAI Routes Diagnostics] focusRouteOnMap called without origin or destination", { origin, destination });
             return false;
+        }
+
+        // Wait up to 1500ms if googleMap instance is still initializing
+        if (!googleMap) {
+            for (let i = 0; i < 15; i++) {
+                await new Promise(r => setTimeout(r, 100));
+                if (googleMap) break;
+            }
         }
 
         // Failure 1: Map unavailable
@@ -966,8 +2023,20 @@ document.addEventListener("DOMContentLoaded", () => {
         clearActiveRoute();
 
         // 3. Resolve origin and destination
-        const origResolved = resolveLocationForMap(origin, originCanonical);
-        const destResolved = resolveLocationForMap(destination, destCanonical);
+        let origResolved = null;
+        if (origCoords && Array.isArray(origCoords) && origCoords.length >= 2) {
+            origResolved = { lat: Number(origCoords[0]), lng: Number(origCoords[1]), name: origin, isTemple: false };
+        } else {
+            origResolved = resolveLocationForMap(origin, originCanonical);
+        }
+
+        let destResolved = null;
+        if (destCoords && Array.isArray(destCoords) && destCoords.length >= 2) {
+            const isTempleCheck = isLikelyTempleName(destination, destCanonical);
+            destResolved = { lat: Number(destCoords[0]), lng: Number(destCoords[1]), name: destination, isTemple: isTempleCheck };
+        } else {
+            destResolved = resolveLocationForMap(destination, destCanonical);
+        }
 
         // Failure 2: Origin coordinates unavailable
         if (!origResolved) {
@@ -981,7 +2050,41 @@ document.addEventListener("DOMContentLoaded", () => {
             return false;
         }
 
-        // 4. Try modern Route.computeRoutes first if available (strict 300ms timeout)
+        // 4. Primary: Directly decode and render polyline from backend Routes API response
+        const activePolyline = polyline || (latestNavigationMeta && latestNavigationMeta.polyline);
+        if (activePolyline && typeof activePolyline === "string" && activePolyline.length > 5) {
+            try {
+                const path = decodePolyline(activePolyline);
+                if (path && path.length > 0) {
+                    const rendered = renderModernPolylineRoute({ path }, origResolved, destResolved);
+                    if (rendered) {
+                        activeNavigationState = {
+                            origin: origin,
+                            destination: destination,
+                            travelMode: (latestNavigationMeta && latestNavigationMeta.travel_mode) || "driving",
+                            distance_km: (latestNavigationMeta && latestNavigationMeta.distance_km) || null,
+                            duration_minutes: (latestNavigationMeta && latestNavigationMeta.duration_minutes) || null,
+                            polyline: activePolyline,
+                            origin_coordinates: origCoords,
+                            destination_coordinates: destCoords
+                        };
+                        if (btn) {
+                            btn.classList.add("success");
+                            btn.innerText = "✓ Route shown on map";
+                            setTimeout(() => {
+                                btn.classList.remove("success");
+                                btn.innerText = "🗺️ View Route on Map";
+                            }, 4000);
+                        }
+                        return true;
+                    }
+                }
+            } catch (polyErr) {
+                console.warn("[PilgrimAI Routes Diagnostics] Failed to decode backend polyline:", polyErr);
+            }
+        }
+
+        // 5. Try modern Route.computeRoutes first if available (strict 300ms timeout)
         const modernRoute = await tryModernRoutesCompute(origResolved, destResolved);
         if (modernRoute) {
             // Failure 6: Route geometry unavailable check
@@ -1003,7 +2106,7 @@ document.addEventListener("DOMContentLoaded", () => {
             }
         }
 
-        // 5. DirectionsService & DirectionsRenderer fallback
+        // 6. DirectionsService & DirectionsRenderer fallback
         return new Promise((resolve) => {
             try {
                 // Failure 4: Routes JS API unavailable
@@ -1083,11 +2186,33 @@ document.addEventListener("DOMContentLoaded", () => {
     };
 
     window.handleViewRouteClick = async function(btn, orig, dest, origCanon, destCanon) {
-        if (!orig || !dest) {
-            orig = orig || (btn && btn.dataset && btn.dataset.origin);
-            dest = dest || (btn && btn.dataset && btn.dataset.destination);
-            origCanon = origCanon || (btn && btn.dataset && btn.dataset.originCanonical);
-            destCanon = destCanon || (btn && btn.dataset && btn.dataset.destinationCanonical);
+        const meta = latestNavigationMeta || {};
+        const mapOriginInput = document.getElementById("mapOriginInput");
+        const currentManualOrigin = (window.getUserManualOrigin && window.getUserManualOrigin()) ||
+            (mapOriginInput && mapOriginInput.value ? mapOriginInput.value.trim() : "");
+
+        if (!dest) {
+            dest = (btn && btn.dataset && btn.dataset.destination) || meta.destination;
+            destCanon = destCanon || (btn && btn.dataset && btn.dataset.destinationCanonical) || meta.destination_canonical;
+        }
+
+        // If user has a manually entered origin in the route planner, preserve it!
+        if (currentManualOrigin) {
+            orig = currentManualOrigin;
+            origCanon = null;
+        } else if (!orig) {
+            orig = (btn && btn.dataset && btn.dataset.origin) || meta.origin;
+            origCanon = origCanon || (btn && btn.dataset && btn.dataset.originCanonical) || meta.origin_canonical;
+        }
+
+        let polyline = (btn && btn.dataset && btn.dataset.polyline) || (meta && meta.polyline) || null;
+        let origCoords = (meta && meta.origin_coordinates) || null;
+        let destCoords = (meta && meta.destination_coordinates) || null;
+        if (btn && btn.dataset && btn.dataset.originCoords) {
+            try { const p = JSON.parse(btn.dataset.originCoords); if (Array.isArray(p) && p.length >= 2) origCoords = p; } catch (e) {}
+        }
+        if (btn && btn.dataset && btn.dataset.destCoords) {
+            try { const p = JSON.parse(btn.dataset.destCoords); if (Array.isArray(p) && p.length >= 2) destCoords = p; } catch (e) {}
         }
 
         if (!orig || !dest) {
@@ -1096,6 +2221,54 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         const originalText = "🗺️ View Route on Map";
+
+        // If user manually entered an origin and it differs from the card's origin,
+        // calculate fresh route directly using the resolved manual origin!
+        const btnOrigin = (btn && btn.dataset && btn.dataset.origin) || "";
+        if (currentManualOrigin && btnOrigin && currentManualOrigin.toLowerCase() !== btnOrigin.toLowerCase()) {
+            if (btn) {
+                btn.disabled = true;
+                btn.classList.add("loading");
+                btn.innerText = "Loading route...";
+            }
+            try {
+                const mode = (latestNavigationMeta && latestNavigationMeta.travel_mode) || "driving";
+                const success = await calculateDirectRoute(currentManualOrigin, dest, mode);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.classList.remove("loading");
+                    if (success) {
+                        btn.classList.add("success");
+                        btn.innerText = "✓ Route shown on map";
+                        setTimeout(() => {
+                            btn.classList.remove("success");
+                            btn.innerText = originalText;
+                        }, 4000);
+                    } else {
+                        btn.classList.add("error");
+                        btn.innerText = "Unable to display this route on the map.";
+                        setTimeout(() => {
+                            btn.classList.remove("error");
+                            btn.innerText = originalText;
+                        }, 4000);
+                    }
+                }
+            } catch (err) {
+                console.warn("[PilgrimAI] handleViewRouteClick recalculation error:", err);
+                if (btn) {
+                    btn.disabled = false;
+                    btn.classList.remove("loading");
+                    btn.classList.add("error");
+                    btn.innerText = "Unable to display this route on the map.";
+                    setTimeout(() => {
+                        btn.classList.remove("error");
+                        btn.innerText = originalText;
+                    }, 4000);
+                }
+            }
+            return;
+        }
+
         if (btn) {
             btn.disabled = true;
             btn.classList.add("loading");
@@ -1103,7 +2276,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         try {
-            const success = await focusRouteOnMap(orig, dest, btn, origCanon, destCanon);
+            const success = await focusRouteOnMap(orig, dest, btn, origCanon, destCanon, polyline, origCoords, destCoords);
             if (btn) {
                 btn.disabled = false;
                 btn.classList.remove("loading");
@@ -1225,9 +2398,18 @@ document.addEventListener("DOMContentLoaded", () => {
                 strokeOpacity: 0.8
             }
         });
+        window.googleMap = googleMap;
+        window.directionsRenderer = directionsRenderer;
 
         // Load 20 temple coordinates from backend registry
         loadTemplePins();
+
+        // Restore pending saved route if initialized before map loaded
+        if (pendingRouteToRestore) {
+            const pr = pendingRouteToRestore;
+            pendingRouteToRestore = null;
+            focusRouteOnMap(pr.origin, pr.destination, pr.btn, pr.originCanonical, pr.destCanonical, pr.polyline, pr.origCoords, pr.destCoords);
+        }
     }
 
     async function loadTemplePins() {
@@ -1320,7 +2502,18 @@ document.addEventListener("DOMContentLoaded", () => {
     function fetchNearbyPlaces(templeName, lat, lng, onComplete) {
         placesRequestStarted = true;
 
-        if (!templeName) templeName = currentSelectedTemple || "Sri Lakshmi Narasimha Swamy Temple, Yadadri";
+        if (!templeName) {
+            if (currentSelectedTemple) {
+                templeName = currentSelectedTemple;
+            } else {
+                if (placesTargetTitle) placesTargetTitle.innerText = "Nearby Discoveries";
+                if (placesList) {
+                    placesList.innerHTML = `<div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px;">Please select a temple from the covered temples list or ask a question to discover nearby places.</div>`;
+                }
+                finish("NO_TEMPLE_SELECTED", 0, null);
+                return;
+            }
+        }
 
         const finish = (status, count, err) => {
             placesLastStatus = status;
@@ -1926,32 +3119,656 @@ document.addEventListener("DOMContentLoaded", () => {
         return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
     }
 
+    let activeInAppPlaceMarker = null;
+    let activeInAppInfoWindow = null;
+
+    function resolveAndShowInAppPlace(query, fallbackUrl) {
+        if (!googleMap) return;
+
+        const qClean = (query || "").toLowerCase();
+        let foundTemple = templeCoordinates.find(t => 
+            (t.canonical_name && qClean.includes(t.canonical_name.toLowerCase())) ||
+            (t.display_name && qClean.includes(t.display_name.toLowerCase()))
+        );
+
+        if (!foundTemple) {
+            for (const [alias, canon] of Object.entries(CANONICAL_TEMPLE_ALIASES)) {
+                if (qClean.includes(alias)) {
+                    foundTemple = templeCoordinates.find(t => t.canonical_name.toLowerCase() === canon.toLowerCase());
+                    if (foundTemple) break;
+                }
+            }
+        }
+
+        const hasPlaces = !!(window.google && google.maps && google.maps.places && google.maps.places.PlacesService);
+        if (hasPlaces) {
+            try {
+                const placesService = new google.maps.places.PlacesService(googleMap);
+                placesService.findPlaceFromQuery({
+                    query: query,
+                    fields: ["name", "geometry", "formatted_address"]
+                }, (results, status) => {
+                    if (status === google.maps.places.PlacesServiceStatus.OK && results && results.length > 0) {
+                        const r = results[0];
+                        const pos = { lat: r.geometry.location.lat(), lng: r.geometry.location.lng() };
+                        displayInAppMarker(pos, r.name || query, r.formatted_address, fallbackUrl);
+                    } else if (foundTemple) {
+                        displayInAppMarker({ lat: foundTemple.latitude, lng: foundTemple.longitude }, query, `Near ${foundTemple.display_name}`, fallbackUrl);
+                    } else {
+                        displayInAppMarker({ lat: currentLat, lng: currentLng }, query, "Near pilgrimage shrine", fallbackUrl);
+                    }
+                });
+                return;
+            } catch (e) {
+                console.warn("[PilgrimAI] PlacesService findPlace error:", e);
+            }
+        }
+
+        if (foundTemple) {
+            displayInAppMarker({ lat: foundTemple.latitude, lng: foundTemple.longitude }, query, `Near ${foundTemple.display_name}`, fallbackUrl);
+        } else {
+            displayInAppMarker({ lat: currentLat, lng: currentLng }, query, "Near pilgrimage shrine", fallbackUrl);
+        }
+    }
+
+    function displayInAppMarker(pos, title, address, externalUrl) {
+        if (!googleMap) return;
+
+        if (activeInAppPlaceMarker) {
+            try { activeInAppPlaceMarker.setMap(null); } catch (e) {}
+        }
+        if (activeInAppInfoWindow) {
+            try { activeInAppInfoWindow.close(); } catch (e) {}
+        }
+
+        activeInAppPlaceMarker = new google.maps.Marker({
+            position: pos,
+            map: googleMap,
+            title: title,
+            animation: google.maps.Animation.DROP,
+            icon: {
+                path: google.maps.SymbolPath.BACKWARD_CLOSED_ARROW,
+                scale: 6,
+                fillColor: "#f59e0b",
+                fillOpacity: 1,
+                strokeColor: "#ffffff",
+                strokeWeight: 2
+            }
+        });
+
+        const infoContent = `
+            <div style="color: #0f172a; padding: 6px 8px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 240px;">
+                <div style="font-weight: 700; font-size: 13px; color: #0f172a; margin-bottom: 2px;">${escapeHtml(title)}</div>
+                <div style="font-size: 11.5px; color: #475569; line-height: 1.4;">${escapeHtml(address || "Located near shrine")}</div>
+                <div style="margin-top: 8px; padding-top: 6px; border-top: 1px solid #e2e8f0; display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                    <span style="font-size: 10px; color: #059669; font-weight: 600; display: inline-flex; align-items: center; gap: 3px;">
+                        <span>✓</span> In-App Map
+                    </span>
+                    <a href="${escapeHtml(externalUrl)}" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #d97706; text-decoration: underline; font-weight: 500;">
+                        External Fallback ↗
+                    </a>
+                </div>
+            </div>
+        `;
+
+        activeInAppInfoWindow = new google.maps.InfoWindow({
+            content: infoContent
+        });
+
+        activeInAppPlaceMarker.addListener("click", () => {
+            activeInAppInfoWindow.open(googleMap, activeInAppPlaceMarker);
+        });
+
+        activeInAppInfoWindow.open(googleMap, activeInAppPlaceMarker);
+        googleMap.panTo(pos);
+        googleMap.setZoom(15);
+    }
+
+    async function calculateDirectRoute(orig, dest, mode = "driving", explicitOriginCoords = null, explicitDestCoords = null) {
+        const btn = document.getElementById("btnCalcRoute") || document.getElementById("mapCalcRouteBtn");
+        if (btn) {
+            btn.disabled = true;
+            btn.classList.add("loading");
+            btn.innerText = "Calculating...";
+        }
+
+        try {
+            // Geocode origin and destination to precise coordinates
+            let resolvedOriginGeo = explicitOriginCoords ? { lat: explicitOriginCoords[0], lng: explicitOriginCoords[1], name: orig } : await geocodeLocationAsync(orig);
+            let resolvedDestGeo = explicitDestCoords ? { lat: explicitDestCoords[0], lng: explicitDestCoords[1], name: dest } : await geocodeLocationAsync(dest);
+
+            if (!resolvedOriginGeo || resolvedOriginGeo.lat === undefined) {
+                clearActiveRoute();
+                showVoiceNotification(`Could not find starting location "${orig}". Please check the spelling or enter a valid location.`);
+                return false;
+            }
+
+            if (!resolvedDestGeo || resolvedDestGeo.lat === undefined) {
+                clearActiveRoute();
+                showVoiceNotification(`Could not find destination "${dest}". Please check the spelling or enter a valid location.`);
+                return false;
+            }
+
+            const origCoords = [Number(resolvedOriginGeo.lat), Number(resolvedOriginGeo.lng)];
+            const destCoords = [Number(resolvedDestGeo.lat), Number(resolvedDestGeo.lng)];
+
+            const reqBody = {
+                origin: (resolvedOriginGeo && resolvedOriginGeo.name) || orig,
+                destination: (resolvedDestGeo && resolvedDestGeo.name) || dest,
+                travel_mode: mode
+            };
+            if (origCoords) reqBody.origin_coordinates = origCoords;
+            if (destCoords) reqBody.destination_coordinates = destCoords;
+
+            const res = await fetch("/api/maps/route", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(reqBody)
+            });
+
+            if (!res.ok) {
+                clearActiveRoute();
+                showVoiceNotification("Route could not be calculated. Please check the locations.");
+                return false;
+            }
+
+            const data = await res.json();
+            if (data.success && data.polyline) {
+                // Ensure map panel is open and visible
+                if (mapPanel && mapPanel.classList.contains("collapsed")) {
+                    mapPanel.classList.remove("collapsed");
+                }
+                if (tabMapBtn && !tabMapBtn.classList.contains("active")) {
+                    tabMapBtn.classList.add("active");
+                    if (tabPlacesBtn) tabPlacesBtn.classList.remove("active");
+                }
+                if (googleMap) {
+                    google.maps.event.trigger(googleMap, "resize");
+                }
+
+                const resolvedOriginName = orig || data.origin;
+                const resolvedDestName = (resolvedDestGeo && !resolvedDestGeo.isTemple) ? (resolvedDestGeo.name || dest) : (data.destination || dest);
+
+                // Update latestNavigationMeta for metrics display
+                latestNavigationMeta = {
+                    origin: resolvedOriginName,
+                    destination: resolvedDestName,
+                    origin_canonical: data.origin_canonical,
+                    destination_canonical: data.destination_canonical,
+                    travel_mode: data.travel_mode || mode,
+                    distance_km: data.distance_km,
+                    duration_minutes: data.duration_minutes,
+                    traffic_duration_minutes: data.traffic_duration_minutes,
+                    polyline: data.polyline,
+                    origin_coordinates: data.origin_coordinates,
+                    destination_coordinates: data.destination_coordinates
+                };
+
+                const success = await focusRouteOnMap(
+                    resolvedOriginName,
+                    resolvedDestName,
+                    btn,
+                    data.origin_canonical,
+                    data.destination_canonical,
+                    data.polyline,
+                    data.origin_coordinates,
+                    data.destination_coordinates
+                );
+
+                if (success) {
+                    activeNavigationState = {
+                        origin: resolvedOriginName,
+                        destination: resolvedDestName,
+                        travelMode: data.travel_mode || mode,
+                        distance_km: data.distance_km,
+                        duration_minutes: data.duration_minutes,
+                        polyline: data.polyline,
+                        origin_coordinates: data.origin_coordinates,
+                        destination_coordinates: data.destination_coordinates
+                    };
+                    window.activeNavigationState = activeNavigationState;
+                    window.latestNavigationMeta = latestNavigationMeta;
+                    return true;
+                }
+            } else {
+                // Calculation failed: Clear any previous route and do not present stale route
+                clearActiveRoute();
+                showVoiceNotification(data.error || data.message || "Route could not be calculated for this journey.");
+                return false;
+            }
+        } catch (err) {
+            console.warn("[PilgrimAI] Direct route calculation error:", err);
+            clearActiveRoute();
+            showVoiceNotification("Route request failed. Please check network connection.");
+            return false;
+        } finally {
+            if (btn) {
+                btn.disabled = false;
+                btn.classList.remove("loading");
+                btn.innerText = "Get Route";
+            }
+        }
+        return false;
+    }
+
+    window.calculateDirectRoute = calculateDirectRoute;
+    window.getActiveRoutePolyline = () => activeRoutePolyline;
+    window.getActiveRouteMarkers = () => activeRouteMarkers;
+    window.getActiveNavigationState = () => activeNavigationState;
+    window.getLatestNavigationMeta = () => latestNavigationMeta;
+    window.getGoogleMap = () => googleMap;
+
+    function initMapRoutePlanner() {
+        const mapOriginInput = document.getElementById("mapOriginInput");
+        const mapDestInput = document.getElementById("mapDestInput");
+        const mapModeSelect = document.getElementById("mapModeSelect");
+        const mapSwapBtn = document.getElementById("mapSwapBtn");
+        const mapUseGpsBtn = document.getElementById("mapUseGpsBtn");
+        const mapCalcRouteBtn = document.getElementById("btnCalcRoute") || document.getElementById("mapCalcRouteBtn");
+        const mapClearRouteBtn = document.getElementById("mapClearRouteBtn");
+
+        let userHasManuallyEditedOrigin = false;
+        let userManualOriginValue = "";
+        let userHasManuallyEditedDest = false;
+        let userManualDestValue = "";
+
+        if (mapOriginInput) {
+            const updateOriginTracking = () => {
+                userManualOriginValue = mapOriginInput.value.trim();
+                userHasManuallyEditedOrigin = Boolean(userManualOriginValue);
+            };
+            mapOriginInput.addEventListener("input", updateOriginTracking);
+            mapOriginInput.addEventListener("change", updateOriginTracking);
+        }
+        window.getUserManualOrigin = () => {
+            const currentVal = mapOriginInput ? mapOriginInput.value.trim() : "";
+            return currentVal || (userHasManuallyEditedOrigin ? userManualOriginValue : null);
+        };
+
+        if (mapDestInput) {
+            const updateDestTracking = () => {
+                userManualDestValue = mapDestInput.value.trim();
+                userHasManuallyEditedDest = Boolean(userManualDestValue);
+            };
+            mapDestInput.addEventListener("input", updateDestTracking);
+            mapDestInput.addEventListener("change", updateDestTracking);
+        }
+        window.getUserManualDestination = () => {
+            const currentVal = mapDestInput ? mapDestInput.value.trim() : "";
+            return currentVal || (userHasManuallyEditedDest ? userManualDestValue : null);
+        };
+
+        if (mapModeSelect) {
+            mapModeSelect.addEventListener("change", async () => {
+                const selectedMode = mapModeSelect.value;
+                const orig = mapOriginInput ? mapOriginInput.value.trim() : "";
+                const dest = mapDestInput ? mapDestInput.value.trim() : "";
+
+                const targetOrig = orig || (activeNavigationState && activeNavigationState.origin);
+                const targetDest = dest || (activeNavigationState && activeNavigationState.destination);
+
+                if (targetOrig && targetDest) {
+                    await calculateDirectRoute(targetOrig, targetDest, selectedMode);
+                } else if (activeNavigationState) {
+                    activeNavigationState.travelMode = selectedMode;
+                }
+            });
+        }
+
+        if (mapSwapBtn) {
+            mapSwapBtn.addEventListener("click", (e) => {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                if (!mapOriginInput || !mapDestInput) return;
+                const temp = mapOriginInput.value;
+                mapOriginInput.value = mapDestInput.value;
+                mapDestInput.value = temp;
+
+                // Swap manual tracking states
+                const tempVal = userManualOriginValue;
+                userManualOriginValue = userManualDestValue;
+                userManualDestValue = tempVal;
+
+                const tempEdited = userHasManuallyEditedOrigin;
+                userHasManuallyEditedOrigin = userHasManuallyEditedDest;
+                userHasManuallyEditedDest = tempEdited;
+
+                if (mapOriginInput.value && mapDestInput.value) {
+                    const mode = mapModeSelect ? mapModeSelect.value : "driving";
+                    calculateDirectRoute(mapOriginInput.value, mapDestInput.value, mode);
+                }
+            });
+        }
+
+        if (mapUseGpsBtn) {
+            mapUseGpsBtn.addEventListener("click", (e) => {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                if (!mapOriginInput) return;
+                if (navigator.geolocation) {
+                    mapOriginInput.placeholder = "Detecting device location...";
+                    navigator.geolocation.getCurrentPosition(
+                        (pos) => {
+                            mapOriginInput.value = `${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`;
+                        },
+                        () => {
+                            mapOriginInput.placeholder = "Starting city or landmark";
+                            alert("Location access was denied or timed out. Please enter your starting city or landmark manually.");
+                        },
+                        { timeout: 5000 }
+                    );
+                } else {
+                    alert("Geolocation is not supported by your browser. Please enter your starting city manually.");
+                }
+            });
+        }
+
+        if (mapCalcRouteBtn) {
+            mapCalcRouteBtn.addEventListener("click", (e) => {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                const orig = mapOriginInput ? mapOriginInput.value.trim() : "";
+                const dest = mapDestInput ? mapDestInput.value.trim() : "";
+                const mode = mapModeSelect ? mapModeSelect.value : "driving";
+
+                if (!orig) {
+                    if (mapOriginInput) {
+                        mapOriginInput.focus();
+                        mapOriginInput.style.borderColor = "var(--accent-gold)";
+                        setTimeout(() => { mapOriginInput.style.borderColor = ""; }, 2000);
+                    }
+                    showVoiceNotification("Where are you starting from? Enter your starting location to see the route.");
+                    return;
+                }
+
+                if (!dest) {
+                    if (mapDestInput) {
+                        mapDestInput.focus();
+                        mapDestInput.style.borderColor = "var(--accent-gold)";
+                        setTimeout(() => { mapDestInput.style.borderColor = ""; }, 2000);
+                    }
+                    showVoiceNotification("Please enter a destination to calculate route.");
+                    return;
+                }
+
+                calculateDirectRoute(orig, dest, mode);
+            });
+        }
+
+        if (mapClearRouteBtn) {
+            mapClearRouteBtn.addEventListener("click", (e) => {
+                if (e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                }
+                userHasManuallyEditedOrigin = false;
+                userManualOriginValue = "";
+                userHasManuallyEditedDest = false;
+                userManualDestValue = "";
+                clearActiveRoute();
+            });
+        }
+
+        [mapOriginInput, mapDestInput].forEach(inp => {
+            if (inp) {
+                inp.addEventListener("keydown", (e) => {
+                    if (e.key === "Enter") {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        if (mapCalcRouteBtn) mapCalcRouteBtn.click();
+                    }
+                });
+            }
+        });
+    }
+
+    window.handleInAppMapLinkClick = async function(event, el) {
+        if (event) {
+            event.preventDefault();
+            event.stopPropagation();
+        }
+        const rawUrl = el ? (el.getAttribute("data-maps-url") || el.getAttribute("href") || "") : "";
+        if (!rawUrl) return;
+
+        // 1. Ensure Map Panel is expanded & interactive map tab is active
+        if (mapPanel && mapPanel.classList.contains("collapsed")) {
+            mapPanel.classList.remove("collapsed");
+        }
+        if (tabMapBtn && !tabMapBtn.classList.contains("active")) {
+            tabMapBtn.classList.add("active");
+            if (tabPlacesBtn) tabPlacesBtn.classList.remove("active");
+        }
+        if (googleMap) {
+            google.maps.event.trigger(googleMap, "resize");
+        }
+
+        // 2. Wait up to 1500ms if googleMap is still initializing
+        if (!googleMap) {
+            for (let i = 0; i < 15; i++) {
+                await new Promise(r => setTimeout(r, 100));
+                if (googleMap) break;
+            }
+        }
+
+        // If map is still unavailable, notify user and provide external link fallback
+        if (!googleMap) {
+            showVoiceNotification("In-app map visualization is currently offline. Opening external Google Maps...");
+            window.open(rawUrl, "_blank", "noopener,noreferrer");
+            return;
+        }
+
+        try {
+            let urlObj = null;
+            try {
+                urlObj = new URL(rawUrl);
+            } catch (e) {
+                urlObj = null;
+            }
+
+            const isDir = urlObj && (urlObj.pathname.includes("/dir") || urlObj.searchParams.has("destination"));
+            let query = "";
+            let dest = "";
+            let orig = "";
+
+            if (isDir) {
+                orig = urlObj.searchParams.get("origin") || "";
+                dest = urlObj.searchParams.get("destination") || "";
+            }
+            if (urlObj && urlObj.searchParams.has("query")) {
+                query = urlObj.searchParams.get("query");
+            } else if (urlObj && urlObj.searchParams.has("destination")) {
+                query = urlObj.searchParams.get("destination");
+            } else if (el && el.innerText) {
+                query = el.innerText.replace(/^[🗺️📍\s]+/, "").trim();
+            }
+
+            query = decodeURIComponent(query || dest || "").replace(/\+/g, " ").trim();
+
+            // P3: If an origin is available, offer a route to that place
+            const knownOrigin = orig || activeNavigationState.origin;
+            if (knownOrigin && query) {
+                const mapOriginInput = document.getElementById("mapOriginInput");
+                const mapDestInput = document.getElementById("mapDestInput");
+                if (mapOriginInput) mapOriginInput.value = knownOrigin;
+                if (mapDestInput) mapDestInput.value = query;
+
+                const routeSuccess = await focusRouteOnMap(knownOrigin, query, null, null, null, null, null, null);
+                if (routeSuccess) {
+                    return;
+                }
+            }
+
+            // P3: If origin is missing, pre-fill destination in route planner and focus origin input
+            const mapDestInput = document.getElementById("mapDestInput");
+            const mapOriginInput = document.getElementById("mapOriginInput");
+            if (mapDestInput && query) mapDestInput.value = query;
+            if (mapOriginInput && !mapOriginInput.value) {
+                mapOriginInput.focus();
+                mapOriginInput.placeholder = "Enter starting location to calculate route";
+            }
+
+            if (!query) {
+                query = currentSelectedTemple || "Temple";
+            }
+
+            resolveAndShowInAppPlace(query, rawUrl);
+
+        } catch (err) {
+            console.warn("[PilgrimAI] handleInAppMapLinkClick error:", err);
+            window.open(rawUrl, "_blank", "noopener,noreferrer");
+        }
+    };
+
     function formatMarkdownText(md) {
         if (!md) return "";
-        let html = escapeHtml(md);
+
+        // Extract <details>...</details> blocks before HTML escaping to render genuine expandable UI component
+        const detailsPlaceholders = [];
+        const detailsBlockRegex = /<details>[\s\r\n]*<summary>(?:<b>)?([\s\S]*?)(?:<\/b>)?<\/summary>([\s\S]*?)<\/details>/gi;
+        let preprocessed = md.replace(detailsBlockRegex, function(match, summaryRaw, bodyRaw) {
+            const cleanSummary = summaryRaw.replace(/<[^>]+>/g, "").trim();
+            const placeholder = `___DETAILS_BLOCK_${detailsPlaceholders.length}___`;
+            detailsPlaceholders.push({
+                summary: cleanSummary || "Optional Seva Tariffs & Counter Offerings",
+                body: bodyRaw.trim()
+            });
+            return `\n\n${placeholder}\n\n`;
+        });
+
+        let html = escapeHtml(preprocessed);
+
+        // Strip raw internal source references e.g. (Source: .../....json) or (Source: ...)
+        html = html.replace(/\s*\(\s*Source:\s*[^)]+\.json\s*\)/gi, "");
+        html = html.replace(/\s*\*\s*\(\s*Source:\s*[^)]+\.json\s*\)\s*\*/gi, "");
+        // Strip trailing raw **Sources:** markdown block from answer body
+        html = html.replace(/\n+\*\*Sources:\*\*\s*(?:\n+-\s*\*\*[^*]+\*\*:[^\n]+)+/gi, "");
 
         // Unescape escaped hashes like \#### or \###
         html = html.replace(/\\(#+)/g, "$1");
+
+        // Clean any raw scraping footnote citations e.g. [[1](http...)] or [[1]http...]
+        html = html.replace(/:?\s*\[\[?\d+\]?\(?https?:\/\/[^\s\])]+\)?\]?/g, ".");
+        html = html.replace(/\.\s*\./g, ".");
+
+        // Parse and extract Markdown Tables before newline-to-break conversions
+        const tablePlaceholders = [];
+        const tableBlockRegex = /(?:^[ \t]*\|.+?\|[ \t]*(?:\r?\n|$)){2,}/gm;
+        html = html.replace(tableBlockRegex, function(match) {
+            const rawLines = match.trim().split(/\r?\n/).map(l => l.trim()).filter(l => l.startsWith("|") && l.endsWith("|"));
+            if (rawLines.length < 2) return match;
+
+            const headerCells = rawLines[0].split("|").slice(1, -1).map(c => c.trim());
+            const sepLine = rawLines[1];
+            // Verify separator row e.g. | :--- | :--- | or | --- | --- |
+            if (!/^\|(?:\s*:?-+:?\s*\|)+$/.test(sepLine)) {
+                return match;
+            }
+
+            let tableHtml = '<div class="budget-table-wrapper"><table class="budget-table"><thead><tr>';
+            headerCells.forEach(cell => {
+                let cellFormatted = cell.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\*(.*?)\*/g, "<em>$1</em>");
+                tableHtml += `<th>${cellFormatted}</th>`;
+            });
+            tableHtml += '</tr></thead><tbody>';
+
+            for (let i = 2; i < rawLines.length; i++) {
+                const rowCells = rawLines[i].split("|").slice(1, -1).map(c => c.trim());
+                tableHtml += '<tr>';
+                rowCells.forEach((cell, cellIdx) => {
+                    let cellFormatted = cell.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>").replace(/\*(.*?)\*/g, "<em>$1</em>");
+                    if (cellIdx === rowCells.length - 1 && (cell.toLowerCase().includes("listed") || cell.toLowerCase().includes("estimated") || cell.toLowerCase().includes("complimentary"))) {
+                        const isListed = cell.toLowerCase().includes("listed") || cell.toLowerCase().includes("complimentary");
+                        cellFormatted = `<span class="evidence-pill ${isListed ? 'evidence-listed' : 'evidence-estimate'}">${cellFormatted}</span>`;
+                    }
+                    tableHtml += `<td>${cellFormatted}</td>`;
+                });
+                tableHtml += '</tr>';
+            }
+            tableHtml += '</tbody></table></div>';
+
+            const idx = tablePlaceholders.length;
+            tablePlaceholders.push(tableHtml);
+            return `\n\n___TABLE_BLOCK_${idx}___\n\n`;
+        });
 
         // Bold
         html = html.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
         // Italic
         html = html.replace(/\*(.*?)\*/g, "<em>$1</em>");
-        // Headers
+        // Headers (apply itinerary-day-heading class specifically to Day headings for prominent typography)
+        html = html.replace(/^(?:####|###)\s*(Day\s+\d+.*$)/gim, '<h4 class="itinerary-day-heading">$1</h4>');
         html = html.replace(/^#### (.*$)/gim, "<h4>$1</h4>");
         html = html.replace(/^### (.*$)/gim, "<h3>$1</h3>");
         html = html.replace(/^## (.*$)/gim, "<h2>$1</h2>");
         html = html.replace(/^# (.*$)/gim, "<h1>$1</h1>");
         // Blockquotes
         html = html.replace(/^> (.*$)/gim, "<blockquote>$1</blockquote>");
-        // Bullet lists
-        html = html.replace(/^\- (.*$)/gim, "<li>$1</li>");
+        // Bullet lists (including indented sub-items)
+        html = html.replace(/^[\s\t]*\-\s+(.*$)/gim, "<li>$1</li>");
         // Wrap adjacent li elements into ul
         html = html.replace(/(<li>.*?<\/li>)/gs, "<ul>$1</ul>");
         html = html.replace(/<\/ul>\s*<ul>/g, "");
+
+        // Links [Label](url) - transform navigation / map links into in-app interactive actions
+        html = html.replace(/\[([^\]]+)\]\((https?:\/\/[^\s\)]+)\)/g, function(match, label, url) {
+            const isMapLink = /directions|route|map/i.test(label) || /google\.com\/maps|maps\.google/i.test(url);
+            if (isMapLink) {
+                return `<a href="${url}" class="in-app-map-action" data-maps-url="${url}" onclick="handleInAppMapLinkClick(event, this)">🗺️ ${label}</a>`;
+            }
+            return `<a href="${url}" target="_blank" rel="noopener noreferrer" style="color:var(--accent-gold);text-decoration:underline;">${label}</a>`;
+        });
+
         // Newlines to line breaks (outside lists)
         html = html.replace(/\n\n/g, "<br><br>");
         html = html.replace(/\n/g, "<br>");
+
+        // Restore parsed HTML tables
+        for (let idx = 0; idx < tablePlaceholders.length; idx++) {
+            html = html.replace(new RegExp(`<br>\\s*___TABLE_BLOCK_${idx}___\\s*<br>`, "g"), tablePlaceholders[idx]);
+            html = html.replace(new RegExp(`___TABLE_BLOCK_${idx}___`, "g"), tablePlaceholders[idx]);
+        }
+
+        // Restore parsed Details Expandable Drawers (P1 fix)
+        for (let idx = 0; idx < detailsPlaceholders.length; idx++) {
+            const item = detailsPlaceholders[idx];
+            let bodyHtml = escapeHtml(item.body);
+            bodyHtml = bodyHtml.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>");
+            bodyHtml = bodyHtml.replace(/\*(.*?)\*/g, "<em>$1</em>");
+            bodyHtml = bodyHtml.replace(/^[\s\t]*\-\s+(.*$)/gim, "<li>$1</li>");
+            bodyHtml = bodyHtml.replace(/(<li>.*?<\/li>)/gs, "<ul>$1</ul>");
+            bodyHtml = bodyHtml.replace(/<\/ul>\s*<ul>/g, "");
+            bodyHtml = bodyHtml.replace(/\n\n/g, "<br>");
+            bodyHtml = bodyHtml.replace(/\n/g, "<br>");
+
+            const drawerHtml = `
+                <details class="seva-expandable-drawer">
+                    <summary class="seva-drawer-summary">
+                        <span class="seva-drawer-left">
+                            <span class="seva-drawer-icon">✨</span>
+                            <strong class="seva-drawer-title">${escapeHtml(item.summary)}</strong>
+                        </span>
+                        <span class="seva-drawer-badge">Click to Expand</span>
+                    </summary>
+                    <div class="seva-drawer-content">
+                        ${bodyHtml}
+                    </div>
+                </details>
+            `;
+
+            html = html.replace(new RegExp(`<br>\\s*___DETAILS_BLOCK_${idx}___\\s*<br>`, "g"), drawerHtml);
+            html = html.replace(new RegExp(`___DETAILS_BLOCK_${idx}___`, "g"), drawerHtml);
+        }
+
+        // Fallback: cleanup any stray or unparsed details/summary escaped tags
+        html = html.replace(/&lt;details&gt;/gi, '<details class="seva-expandable-drawer">');
+        html = html.replace(/&lt;\/details&gt;/gi, '</details>');
+        html = html.replace(/&lt;summary&gt;(?:&lt;b&gt;)?([\s\S]*?)(?:&lt;\/b&gt;)?&lt;\/summary&gt;/gi, '<summary class="seva-drawer-summary"><span class="seva-drawer-left"><span class="seva-drawer-icon">✨</span><strong class="seva-drawer-title">$1</strong></span><span class="seva-drawer-badge">Click to Expand</span></summary>');
 
         return html;
     }
@@ -2010,6 +3827,7 @@ document.addEventListener("DOMContentLoaded", () => {
             if (appLayout) appLayout.style.display = "flex";
             if (window.lucide) lucide.createIcons();
             if (googleMap) google.maps.event.trigger(googleMap, "resize");
+            loadChatHistory(true);
             return;
         }
 
@@ -2212,6 +4030,9 @@ document.addEventListener("DOMContentLoaded", () => {
         logoutBtn.addEventListener("click", () => {
             localStorage.removeItem("pilgrim_jwt");
             createFreshSession();
+            if (chatHistoryList) {
+                chatHistoryList.innerHTML = '<div class="history-empty-msg">No conversations yet</div>';
+            }
             switchAuthView("AUTH_LOGIN");
         });
     }

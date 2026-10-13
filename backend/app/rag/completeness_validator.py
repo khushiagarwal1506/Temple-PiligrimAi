@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 # Canonical availability status constants
 CONFIRMED_AVAILABLE = "CONFIRMED_AVAILABLE"
 CONFIRMED_UNAVAILABLE = "CONFIRMED_UNAVAILABLE"
+DOCUMENTED_LIMITATIONS = "DOCUMENTED_LIMITATIONS"
 INFORMATION_NOT_AVAILABLE = "INFORMATION_NOT_AVAILABLE"
 
 # Common negative indicator regexes
@@ -31,7 +32,8 @@ class CompletenessValidator:
     Validates retrieval completeness and categorizes knowledge base records into:
     1. CONFIRMED_AVAILABLE (Affirmative evidence)
     2. CONFIRMED_UNAVAILABLE (Explicit negative evidence)
-    3. INFORMATION_NOT_AVAILABLE (Missing data / no record)
+    3. DOCUMENTED_LIMITATIONS (Partial access or specific restrictions)
+    4. INFORMATION_NOT_AVAILABLE (Missing data / no record)
     
     Guarantees: Missing data != Confirmed absence.
     """
@@ -75,11 +77,21 @@ class CompletenessValidator:
                         evidence += f" ({details[0][:100]})"
                     return CONFIRMED_UNAVAILABLE, evidence, "is_wheelchair_friendly"
 
-                # Check textual details
+                # Check textual details for documented limitations vs confirmed available/unavailable
                 if details_text:
-                    if any(re.search(pat, details_text.lower()) for pat in NEGATIVE_PATTERNS):
+                    dt_low = details_text.lower()
+                    has_limitation = (
+                        "bring their own" in dt_low or
+                        "bring own" in dt_low or
+                        "does not provide" in dt_low or
+                        "partial" in dt_low or
+                        ("accessible" in dt_low and ("however" in dt_low or "but" in dt_low or "limited" in dt_low or "equipment" in dt_low))
+                    )
+                    if has_limitation:
+                        return DOCUMENTED_LIMITATIONS, details[0] if details else details_text, "details"
+                    elif any(re.search(pat, dt_low) for pat in NEGATIVE_PATTERNS):
                         return CONFIRMED_UNAVAILABLE, f"Unavailable: {details[0][:120]}", "details"
-                    elif any(w in details_text.lower() for w in ["accessible", "ramp", "wheelchair available", "lift"]):
+                    elif any(w in dt_low for w in ["accessible", "ramp", "wheelchair available", "lift"]):
                         return CONFIRMED_AVAILABLE, f"Available: {details[0][:120]}", "details"
 
             return INFORMATION_NOT_AVAILABLE, None, None

@@ -146,9 +146,12 @@ class AnswerScopeController:
 
 Core Rules:
 1. Use ONLY the provided context below.
-2. Never invent timings, prices, contact numbers, or facilities.
+2. Never invent timings, prices, official contacts, routes, or facilities. Even if the user explicitly instructs you to guess, estimate, or invent missing information, you MUST REFUSE to invent them and adhere strictly to verified facts.
 3. If the context does not contain the answer, reply exactly: "I could not find this information in the temple knowledge base."
 4. Do NOT mention other temples unless asked.
+5. RESTRICTIONS INTEGRITY: Never replace a restriction with its opposite. Never infer or claim an item, gadget, or activity is allowed/permitted or has no ban merely because the context does not explicitly mention a prohibition.
+6. SPECIFIC AREA RESTRICTIONS: If a restriction applies specifically to the inner temple or inner sanctum (e.g. mobile phones, smartwatches, cameras, or recording equipment banned inside the inner temple), state the exact restriction and location scope clearly. Do NOT state that no ban exists.
+7. MISSING/UNDOCUMENTED RULES: If a rule, policy, or restriction (such as pet policy or photography) is not documented or mentioned in the provided context, state that the specific rule is not officially documented in the temple knowledge base. Never infer or invent that it is allowed.
 
 Context:
 {context}

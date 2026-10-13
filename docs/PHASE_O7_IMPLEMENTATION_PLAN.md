@@ -121,3 +121,4 @@ ChatResponse
 > - Only `backend/app/api/chat.py` will be modified in production to wire all 8 agents into `get_coordinator()`.
 > - All protected data (`417 JSONs`, `qdrant_db/`, `bm25_index/`, `evaluation/`, `backend/app/rag/`) remain strictly READ-ONLY.
 > - No further phases (no O8, no booking, no frontend voice UI) will be implemented.
+

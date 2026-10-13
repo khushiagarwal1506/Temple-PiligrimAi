@@ -13,6 +13,7 @@ Core Principles:
 """
 
 import os
+import re
 import json
 import logging
 from pathlib import Path
@@ -28,7 +29,7 @@ _DEFAULT_COORDINATE_FILE = Path(__file__).resolve().parent / "data" / "temple_co
 _CANONICAL_TEMPLE_ALIASES: Dict[str, List[str]] = {
     "Ahobilam": ["ahobilam", "ahobila", "narasimha ahobilam", "sri ahobila narasimha"],
     "Badrachalam": ["badrachalam", "bhadrachalam", "bhadragiri", "rama temple bhadrachalam", "lord rama bhadrachalam", "sree seetha ramachandra"],
-    "Balkampet": ["balkampet", "yellamma", "balkampet yellamma", "yellamma temple"],
+    "Balkampet": ["balkampet", "balkampet temple", "yellamma", "balkampet yellamma", "yellamma temple", "balkampet yellamma temple"],
     "Basara": ["basara", "basar", "gnana saraswathi", "saraswathi temple", "sri gnana saraswathi devasthanam"],
     "Birla Mandir": ["birla mandir", "birla", "birla temple"],
     "Chilkur": ["chilkur", "visa balaji", "chilkur balaji", "chilkur balaji temple"],
@@ -36,14 +37,20 @@ _CANONICAL_TEMPLE_ALIASES: Dict[str, List[str]] = {
     "Edupayal": ["edupayal", "edupayala", "edupayala durga", "vanadurga bhavani", "sri edupayala vana durga"],
     "Jogulamba(New)": ["jogulamba", "jogulamba(new)", "alampur", "jogulamba devi", "alampur jogulamba"],
     "Kaleshvaram": ["kaleshvaram", "kaleshwaram", "mukteshwara", "kaleshwara", "sri kaleshwara mukteshwara"],
-    "Karmanghat": ["karmanghat", "karmanghat hanuman", "hanuman temple karmanghat"],
+    "Karmanghat": ["karmanghat", "karmaghat", "karmanghat hanuman", "hanuman temple karmanghat"],
     "Medaram": ["medaram", "sammakka", "saralamma", "jatara medaram", "sammakka saralamma", "sammakka saralamma gaddelu"],
     "Ramappa": ["ramappa", "ramalingeswara", "rudreshwara", "ramappa temple"],
     "Srisaila": ["srisaila", "srisailam", "mallikarjuna", "bhramaramba", "srisailam temple"],
     "Thousand Pillar": ["thousand pillar", "thousand pillars", "rudreswara thousand", "thousand pillar temple"],
     "Ttd": ["ttd", "tirumala", "tirupati", "venkateswara ttd", "lord venkateswara", "tirumala venkateswara"],
-    "Ujjaini": ["ujjaini", "ujjaini mahakali", "mahakali secunderabad", "secunderabad mahakali", "sri ujjaini mahakali"],
-    "Veera Satyanarayana": ["veera satyanarayana", "satyanarayana swamy", "annavaram", "veera venkata satyanarayana", "annavaram satyanarayana"],
+    "Ujjaini": [
+        "ujjaini", "ujjaini mahakali", "ujjaini mahankali", "mahakali secunderabad",
+        "secunderabad mahakali", "secunderabad mahankali", "sri ujjaini mahakali",
+        "sri ujjaini mahankali", "ujjaini mahakali temple", "ujjaini mahankali temple",
+        "sri ujjaini mahakali temple", "sri ujjaini mahankali temple", "ujjaini temple",
+        "ujjaini devasthanam"
+    ],
+    "Veera Satyanarayana": ["veera satyanarayana", "satyanarayana swamy", "annavaram", "annavarm", "veera venkata satyanarayana", "annavaram satyanarayana"],
     "Vemulavada": ["vemulavada", "vemulawada", "rajarajeshwara", "rajanne", "rajanna", "sri raja rajeshwara"],
     "Yadadri": ["yadadri", "yadagirigutta", "laxmi narasimha yadadri", "narasimha yadadri", "yadagirigutta temple"]
 }
@@ -181,6 +188,15 @@ class TempleCoordinateRegistry:
         clean_no_punct = clean.replace("(", "").replace(")", "").replace("-", " ")
         if clean_no_punct in self._alias_map:
             return self._alias_map[clean_no_punct]
+
+        # Check common religious suffix stripping (temple, mandir, devasthanam, etc.)
+        stripped = re.sub(r"\s+(?:temple|mandir|devasthanam|devalayam|kovil|gudi|matha|swamy)\s*$", "", clean).strip()
+        if stripped and stripped in self._alias_map:
+            return self._alias_map[stripped]
+
+        stripped_no_punct = re.sub(r"\s+(?:temple|mandir|devasthanam|devalayam|kovil|gudi|matha|swamy)\s*$", "", clean_no_punct).strip()
+        if stripped_no_punct and stripped_no_punct in self._alias_map:
+            return self._alias_map[stripped_no_punct]
 
         return None
 

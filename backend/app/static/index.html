@@ -1,15 +1,19 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PilgrimAI — Telangana Temples AI Assistant</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=3.0">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css?v=5.0">
     <script src="https://unpkg.com/lucide@latest"></script>
 </head>
+
 <body>
     <!-- ============================================================= -->
     <!-- 1. Standalone Authentication Page (First Page When Unauthenticated) -->
@@ -19,8 +23,11 @@
             <!-- Brand Header -->
             <div class="auth-brand">
                 <div class="auth-brand-logo">
-                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2">
+                        </polygon>
                     </svg>
                 </div>
                 <h1>PILGRIMAI</h1>
@@ -33,11 +40,13 @@
                 <form id="loginForm" class="auth-form" autocomplete="on">
                     <div class="form-group">
                         <label for="loginEmail">Email</label>
-                        <input type="email" id="loginEmail" placeholder="name@example.com" required autocomplete="email">
+                        <input type="email" id="loginEmail" placeholder="name@example.com" required
+                            autocomplete="email">
                     </div>
                     <div class="form-group">
                         <label for="loginPassword">Password</label>
-                        <input type="password" id="loginPassword" placeholder="••••••••" required autocomplete="current-password">
+                        <input type="password" id="loginPassword" placeholder="••••••••" required
+                            autocomplete="current-password">
                     </div>
                     <div class="form-row-link">
                         <button type="button" id="linkToForgotPassword" class="btn-text-link">Forgot Password?</button>
@@ -65,11 +74,13 @@
                     </div>
                     <div class="form-group">
                         <label for="regPassword">Password</label>
-                        <input type="password" id="regPassword" minlength="4" placeholder="••••••••" required autocomplete="new-password">
+                        <input type="password" id="regPassword" minlength="4" placeholder="••••••••" required
+                            autocomplete="new-password">
                     </div>
                     <div class="form-group">
                         <label for="regPasswordConfirm">Confirm Password</label>
-                        <input type="password" id="regPasswordConfirm" minlength="4" placeholder="••••••••" required autocomplete="new-password">
+                        <input type="password" id="regPasswordConfirm" minlength="4" placeholder="••••••••" required
+                            autocomplete="new-password">
                     </div>
                     <div id="registerError" class="auth-error-msg" style="display: none;"></div>
                     <div id="registerSuccess" class="auth-success-msg" style="display: none;"></div>
@@ -84,7 +95,8 @@
             <!-- View 3: FORGOT PASSWORD (AUTH_FORGOT_PASSWORD) -->
             <div id="viewForgotPassword" class="auth-view-content" style="display: none;">
                 <h2 class="auth-heading">Forgot Password</h2>
-                <p class="auth-subtext">Enter the email address associated with your account to receive a secure reset link.</p>
+                <p class="auth-subtext">Enter the email address associated with your account to receive a secure reset
+                    link.</p>
                 <form id="forgotPasswordForm" class="auth-form">
                     <div class="form-group">
                         <label for="forgotEmail">Email Address</label>
@@ -107,11 +119,13 @@
                     <input type="hidden" id="resetTokenValue">
                     <div class="form-group">
                         <label for="resetPasswordInput">New Password</label>
-                        <input type="password" id="resetPasswordInput" minlength="4" placeholder="••••••••" required autocomplete="new-password">
+                        <input type="password" id="resetPasswordInput" minlength="4" placeholder="••••••••" required
+                            autocomplete="new-password">
                     </div>
                     <div class="form-group">
                         <label for="resetPasswordConfirmInput">Confirm New Password</label>
-                        <input type="password" id="resetPasswordConfirmInput" minlength="4" placeholder="••••••••" required autocomplete="new-password">
+                        <input type="password" id="resetPasswordConfirmInput" minlength="4" placeholder="••••••••"
+                            required autocomplete="new-password">
                     </div>
                     <div id="resetError" class="auth-error-msg" style="display: none;"></div>
                     <div id="resetSuccess" class="auth-success-msg" style="display: none;"></div>
@@ -132,8 +146,11 @@
         <aside class="sidebar">
             <div class="brand-header">
                 <div class="brand-logo">
-                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon>
+                    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <polygon
+                            points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2">
+                        </polygon>
                     </svg>
                 </div>
                 <div class="brand-title">
@@ -150,29 +167,61 @@
             </div>
 
             <div class="sidebar-scroll">
+                <!-- Chat History Section -->
+                <div class="chat-history-section" id="chatHistorySection">
+                    <div class="chat-history-header">
+                        <h3>Chat History</h3>
+                    </div>
+                    <div class="chat-history-list" id="chatHistoryList">
+                        <div class="history-empty-msg">No conversations yet</div>
+                    </div>
+                </div>
+
+                <div class="sidebar-divider"></div>
+
                 <h3>Covered Temples (20)</h3>
                 <ul class="temple-list" id="templeList">
                     <!-- Populated dynamically via /api/maps/temples -->
-                    <li class="temple-item" data-temple="Yadadri"><span class="temple-item-left"><span class="dot-online"></span> Yadadri</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Basara"><span class="temple-item-left"><span class="dot-online"></span> Basara</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Srisailam"><span class="temple-item-left"><span class="dot-online"></span> Srisailam</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Bhadrachalam"><span class="temple-item-left"><span class="dot-online"></span> Bhadrachalam</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Vemulavada"><span class="temple-item-left"><span class="dot-online"></span> Vemulavada</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Ramappa"><span class="temple-item-left"><span class="dot-online"></span> Ramappa</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Thousand Pillar"><span class="temple-item-left"><span class="dot-online"></span> Thousand Pillar</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Birla Mandir"><span class="temple-item-left"><span class="dot-online"></span> Birla Mandir</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Karmanghat"><span class="temple-item-left"><span class="dot-online"></span> Karmanghat</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Ujjaini"><span class="temple-item-left"><span class="dot-online"></span> Ujjaini Mahakali</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Edupayal"><span class="temple-item-left"><span class="dot-online"></span> Edupayala</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Dharmapuri"><span class="temple-item-left"><span class="dot-online"></span> Dharmapuri</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Balkampet"><span class="temple-item-left"><span class="dot-online"></span> Balkampet</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Ttd"><span class="temple-item-left"><span class="dot-online"></span> Tirumala (TTD)</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Jogulamba"><span class="temple-item-left"><span class="dot-online"></span> Jogulamba</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Ahobilam"><span class="temple-item-left"><span class="dot-online"></span> Ahobilam</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Chilkur"><span class="temple-item-left"><span class="dot-online"></span> Chilkur Balaji</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Kaleshwaram"><span class="temple-item-left"><span class="dot-online"></span> Kaleshwaram</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Medaram"><span class="temple-item-left"><span class="dot-online"></span> Medaram</span><span class="pin-icon">📍</span></li>
-                    <li class="temple-item" data-temple="Annavaram"><span class="temple-item-left"><span class="dot-online"></span> Annavaram</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Yadadri"><span class="temple-item-left"><span
+                                class="dot-online"></span> Yadadri</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Basara"><span class="temple-item-left"><span
+                                class="dot-online"></span> Basara</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Srisailam"><span class="temple-item-left"><span
+                                class="dot-online"></span> Srisailam</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Bhadrachalam"><span class="temple-item-left"><span
+                                class="dot-online"></span> Bhadrachalam</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Vemulavada"><span class="temple-item-left"><span
+                                class="dot-online"></span> Vemulavada</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Ramappa"><span class="temple-item-left"><span
+                                class="dot-online"></span> Ramappa</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Thousand Pillar"><span class="temple-item-left"><span
+                                class="dot-online"></span> Thousand Pillar</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Birla Mandir"><span class="temple-item-left"><span
+                                class="dot-online"></span> Birla Mandir</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Karmanghat"><span class="temple-item-left"><span
+                                class="dot-online"></span> Karmanghat</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Ujjaini"><span class="temple-item-left"><span
+                                class="dot-online"></span> Ujjaini Mahakali</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Edupayal"><span class="temple-item-left"><span
+                                class="dot-online"></span> Edupayala</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Dharmapuri"><span class="temple-item-left"><span
+                                class="dot-online"></span> Dharmapuri</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Balkampet"><span class="temple-item-left"><span
+                                class="dot-online"></span> Balkampet</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Ttd"><span class="temple-item-left"><span
+                                class="dot-online"></span> Tirumala (TTD)</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Jogulamba"><span class="temple-item-left"><span
+                                class="dot-online"></span> Jogulamba</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Ahobilam"><span class="temple-item-left"><span
+                                class="dot-online"></span> Ahobilam</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Chilkur"><span class="temple-item-left"><span
+                                class="dot-online"></span> Chilkur Balaji</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Kaleshwaram"><span class="temple-item-left"><span
+                                class="dot-online"></span> Kaleshwaram</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Medaram"><span class="temple-item-left"><span
+                                class="dot-online"></span> Medaram</span><span class="pin-icon">📍</span></li>
+                    <li class="temple-item" data-temple="Annavaram"><span class="temple-item-left"><span
+                                class="dot-online"></span> Annavaram</span><span class="pin-icon">📍</span></li>
                 </ul>
             </div>
 
@@ -209,7 +258,8 @@
                     <!-- Authenticated User Control -->
                     <div class="user-account-menu" id="userAccountMenu">
                         <div class="user-pill" id="userPill">
-                            <i data-lucide="user-check" style="width: 14px; height: 14px; color: var(--accent-gold);"></i>
+                            <i data-lucide="user-check"
+                                style="width: 14px; height: 14px; color: var(--accent-gold);"></i>
                             <span id="headerUserName">Pilgrim</span>
                         </div>
                         <button type="button" id="logoutBtn" class="btn-auth-logout" title="Sign Out">
@@ -223,7 +273,8 @@
             <div class="message-area" id="messageArea">
                 <div class="welcome-box" id="welcomeBox">
                     <h2>Namaste! Welcome to PilgrimAI</h2>
-                    <p>Your intelligent, verified pilgrimage companion for 20 major Telangana & regional shrines. Select a prompt or ask your question below:</p>
+                    <p>Your intelligent, verified pilgrimage companion for 20 major Telangana & regional shrines. Select
+                        a prompt or ask your question below:</p>
 
                     <div class="prompt-grid">
                         <div class="prompt-card" onclick="sendPrompt('What are the timings of Yadadri temple?')">
@@ -241,7 +292,8 @@
                         <div class="prompt-card" onclick="sendPrompt('Plan a one-day visit to Yadadri.')">
                             📅 <strong>Yadadri Itinerary</strong><br>One-day pilgrimage schedule
                         </div>
-                        <div class="prompt-card" onclick="sendPrompt('Compare Srisailam and Bhadrachalam accommodation.')">
+                        <div class="prompt-card"
+                            onclick="sendPrompt('Compare Srisailam and Bhadrachalam accommodation.')">
                             ⚖️ <strong>Srisailam vs Bhadrachalam</strong><br>Compare stay options
                         </div>
                     </div>
@@ -253,7 +305,9 @@
                     <button type="button" id="micBtn" class="btn-mic" title="Voice Input (Speech-to-Text)">
                         <i data-lucide="mic" style="width: 18px; height: 18px;"></i>
                     </button>
-                    <input type="text" id="userQuery" placeholder="Ask about timings, navigation routes, weather, or sevas..." autocomplete="off" required>
+                    <input type="text" id="userQuery"
+                        placeholder="Ask about timings, navigation routes, weather, or sevas..." autocomplete="off"
+                        required>
                     <button type="submit" id="submitBtn" class="btn-send">
                         <span>Ask AI</span>
                         <i data-lucide="send" style="width: 15px; height: 15px;"></i>
@@ -280,6 +334,43 @@
                         <span>Nearby Places</span>
                     </button>
                 </div>
+
+                <!-- Live Route Planner Bar -->
+                <div class="map-route-planner" id="mapRoutePlanner">
+                    <div class="map-planner-row-top">
+                        <span class="map-planner-badge">🧭 Route Planner</span>
+                        <button type="button" class="btn-planner-swap" id="mapSwapBtn" title="Swap Origin and Destination">⇄ Swap</button>
+                    </div>
+                    <div class="map-planner-inputs">
+                        <div class="map-input-group">
+                            <label for="mapOriginInput">From:</label>
+                            <div class="map-input-wrapper">
+                                <input type="text" id="mapOriginInput" placeholder="Starting city, station, or landmark" autocomplete="off">
+                                <button type="button" id="mapUseGpsBtn" class="btn-input-gps" title="Use current location">📍</button>
+                            </div>
+                        </div>
+                        <div class="map-input-group">
+                            <label for="mapDestInput">To:</label>
+                            <input type="text" id="mapDestInput" placeholder="Temple, landmark, or destination" autocomplete="off">
+                        </div>
+                    </div>
+                    <div class="map-planner-controls">
+                        <select id="mapModeSelect" class="map-mode-select">
+                            <option value="driving" selected>🚗 Driving</option>
+                            <option value="transit">🚌 Transit / Bus</option>
+                            <option value="two_wheeler">🛵 Two-Wheeler</option>
+                            <option value="walking">🚶 Walking</option>
+                        </select>
+                        <button type="button" id="btnCalcRoute" class="btn-calc-route">
+                            <span>Get Route</span>
+                        </button>
+                    </div>
+                    <!-- Active Route Summary Strip -->
+                    <div id="mapRouteStrip" class="map-route-strip" style="display: none;">
+                        <span id="mapRouteSummaryText" class="map-route-summary-text"></span>
+                        <button type="button" id="mapClearRouteBtn" class="btn-clear-route" title="Clear Route">✕ Clear</button>
+                    </div>
+                </div>
             </div>
 
             <!-- Map View Container -->
@@ -287,20 +378,24 @@
                 <div id="googleMapContainer"></div>
                 <!-- Offline Fallback Banner -->
                 <div id="mapFallback" class="map-fallback-banner" style="display: none;">
-                    <i data-lucide="map-pin-off" style="width: 32px; height: 32px; color: var(--accent-gold); margin-bottom: 8px;"></i>
+                    <i data-lucide="map-pin-off"
+                        style="width: 32px; height: 32px; color: var(--accent-gold); margin-bottom: 8px;"></i>
                     <h3>Google Maps Unavailable</h3>
-                    <p>Map visualization is offline or restricted. Verified local RAG chat and multi-agent guidance remain 100% operational.</p>
+                    <p>Map visualization is offline or restricted. Verified local RAG chat and multi-agent guidance
+                        remain 100% operational.</p>
                 </div>
             </div>
 
             <!-- Places List View -->
             <div class="places-panel" id="placesPanel">
                 <div class="places-header">
-                    <span style="font-size: 13px; font-weight: 700; color: #fff;" id="placesTargetTitle">Nearby Discoveries</span>
+                    <span style="font-size: 13px; font-weight: 700; color: #fff;" id="placesTargetTitle">Nearby
+                        Discoveries</span>
                     <span class="places-provenance-badge">Live Google Places Results</span>
                 </div>
                 <div style="font-size: 11.5px; color: var(--text-muted);">
-                    Live external amenities around selected shrines (accommodations, dining, facilities). Distinct from verified temple records.
+                    Live external amenities around selected shrines (accommodations, dining, facilities). Distinct from
+                    verified temple records.
                 </div>
                 <div class="places-list" id="placesList">
                     <div style="font-size: 12px; color: var(--text-muted); text-align: center; padding: 20px;">
@@ -312,6 +407,7 @@
     </div>
 
     <!-- Application Script -->
-    <script src="/static/app.js?v=4.0"></script>
+    <script src="/static/app.js?v=5.7"></script>
 </body>
+
 </html>

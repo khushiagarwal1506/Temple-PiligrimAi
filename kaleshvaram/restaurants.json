@@ -1,21 +1,52 @@
 [
   {
+    "name": "Devasthanam Annadana Satram",
+    "cuisine": "Free Wholesome Vegetarian Meal",
+    "type": "Temple Annadanam / Canteen",
+    "distance": "Inside Temple Complex",
+    "pricing": "Free",
+    "timings": "12:00 PM – 2:30 PM",
+    "address": "Temple Complex",
+    "speciality": "Free wholesome vegetarian lunch served daily to visiting devotees during afternoon hours."
+  },
+  {
     "name": "Haritha Restaurant",
     "cuisine": "Pure Veg & South Indian Meals",
     "type": "State Tourism Restaurant",
     "distance": "~1 km",
     "pricing": "₹50 – ₹200",
     "timings": "7:00 AM – 10:00 PM",
-    "address": "TG Tourism Hotel, Main Road"
+    "address": "TG Tourism Hotel, Main Road",
+    "speciality": "Operated by Telangana Tourism, serving clean vegetarian meals, thalis, and hot tiffins."
   },
-
   {
-    "name": "Devasthanam Annadana Satram",
-    "cuisine": "Free Wholesome Vegetarian Meal",
-    "type": "Temple Annadanam / Canteen",
-    "distance": "Inside",
-    "pricing": "Free",
-    "timings": "12:00 PM – 2:30 PM",
-    "address": "Temple Complex"
+    "name": "Local Pilgrim Tiffin Centers & Messes",
+    "cuisine": "South Indian Vegetarian Tiffins & Meals",
+    "type": "Family-run Pilgrim Eateries",
+    "distance": "~200 m (Temple Arch & Main Road)",
+    "pricing": "₹40 – ₹90",
+    "timings": "6:00 AM – 9:30 PM",
+    "address": "Temple Arch Road, Kaleshwaram",
+    "speciality": "Hot breakfast tiffins (idli, vada, dosa, upma) and economical homestyle vegetarian meals."
+  },
+  {
+    "name": "Dakshina Triveni Sangam Refreshments",
+    "cuisine": "Vegetarian Snacks & Tiffins",
+    "type": "Riverside Canteen",
+    "distance": "~1.0 km (Bathing Ghats)",
+    "pricing": "₹30 – ₹70",
+    "timings": "6:00 AM – 6:00 PM",
+    "address": "Triveni Sangam River Bank",
+    "speciality": "Fresh tea, coffee, breakfast items, and snacks located right beside the holy bathing ghats."
+  },
+  {
+    "name": "Highway Veg Food Courts & Transit Messes",
+    "cuisine": "South Indian Thali & Highway Meals",
+    "type": "Transit Eatery",
+    "distance": "~4–15 km (Manthani Route)",
+    "pricing": "₹80 – ₹160",
+    "timings": "7:00 AM – 10:30 PM",
+    "address": "Manthani–Kaleshwaram Highway Corridor",
+    "speciality": "Convenient vegetarian lunch and dinner options along the return travel route towards Manthani and Ramagundam."
   }
 ]

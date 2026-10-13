@@ -16,7 +16,10 @@ class LocalCrossEncoderReranker:
     def __init__(self, model_name: str = settings.RERANKER_MODEL):
         self.model_name = model_name
         logger.info(f"Initializing Local Cross-Encoder Reranker ('{model_name}')...")
-        self.model = CrossEncoder(model_name)
+        try:
+            self.model = CrossEncoder(model_name, local_files_only=True)
+        except Exception:
+            self.model = CrossEncoder(model_name)
 
     def rerank(
         self,

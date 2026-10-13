@@ -42,6 +42,31 @@ def get_users_collection(db_name: Optional[str] = None) -> Collection:
         logger.warning(f"[MONGODB] Warning ensuring unique email index: {e}")
     return users_col
 
+def get_chat_sessions_collection(db_name: Optional[str] = None) -> Collection:
+    """Returns the chat_sessions collection with unique (user_id, session_id) and (user_id, updated_at) indexes ensured."""
+    db = get_database(db_name)
+    sessions_col = db["chat_sessions"]
+    try:
+        sessions_col.create_index([("user_id", pymongo.ASCENDING), ("session_id", pymongo.ASCENDING)], unique=True)
+        sessions_col.create_index([("user_id", pymongo.ASCENDING), ("updated_at", pymongo.DESCENDING)])
+    except Exception as e:
+        logger.warning(f"[MONGODB] Warning ensuring chat_sessions indexes: {e}")
+    return sessions_col
+
+def get_chat_messages_collection(db_name: Optional[str] = None) -> Collection:
+    """Returns the chat_messages collection with (user_id, session_id, created_at) index ensured."""
+    db = get_database(db_name)
+    messages_col = db["chat_messages"]
+    try:
+        messages_col.create_index([
+            ("user_id", pymongo.ASCENDING),
+            ("session_id", pymongo.ASCENDING),
+            ("created_at", pymongo.ASCENDING)
+        ])
+    except Exception as e:
+        logger.warning(f"[MONGODB] Warning ensuring chat_messages indexes: {e}")
+    return messages_col
+
 def close_mongo_connection():
     """Closes MongoDB client connection."""
     global _mongo_client

@@ -115,6 +115,7 @@ class AgentState(BaseModel):
     session_id: str = Field(default="default_session", description="Unique conversation session identifier")
     user_query: str = Field(default="", description="Original natural language query from the user")
     detected_intents: List[str] = Field(default_factory=list, description="Intents identified during query planning/routing")
+    extracted_params: Dict[str, Any] = Field(default_factory=dict, description="Extracted parameters such as origin, destination, travel_mode")
     structured_constraints: Dict[str, Any] = Field(default_factory=dict, description="Structured constraints (duration_days, budget_limit, accommodation_required, temples, pax) extracted from query")
     active_agent: Optional[str] = Field(default=None, description="Name of the currently executing agent")
     intermediate_results: Dict[str, Any] = Field(default_factory=dict, description="Per-agent intermediate outputs keyed by agent name")

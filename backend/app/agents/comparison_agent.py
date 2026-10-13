@@ -61,14 +61,20 @@ class ComparisonAgent(BaseAgent):
             "Edupayal": ["edupayal", "edupayala", "edupayala durga", "vanadurga bhavani", "vana durga bhavani", "vana durga", "edupayala vanadurga"],
             "Jogulamba(new)": ["jogulamba", "jogulamba(new)", "jogulamba(New)", "alampur", "jogulamba devi"],
             "Kaleshvaram": ["kaleshvaram", "kaleshwaram", "mukteshwara", "kaleshwara"],
-            "Karmanghat": ["karmanghat", "karmanghat hanuman"],
+            "Karmanghat": ["karmanghat", "karmaghat", "karmanghat hanuman"],
             "Medaram": ["medaram", "sammakka", "saralamma", "jatara medaram", "sammakka saralamma"],
             "Ramappa": ["ramappa", "ramalingeswara", "rudreshwara"],
             "Srisaila": ["srisaila", "srisailam", "mallikarjuna", "bhramaramba"],
             "Thousand Pillar": ["thousand pillar", "thousand pillars", "rudreswara thousand", "thousand pillar temple"],
             "Ttd": ["ttd", "tirumala", "tirupati", "venkateswara ttd", "lord venkateswara"],
-            "Ujjaini": ["ujjaini", "ujjaini mahakali", "mahakali secunderabad", "secunderabad mahakali"],
-            "Veera Satyanarayana": ["veera satyanarayana", "satyanarayana swamy", "annavaram", "veera venkata satyanarayana"],
+            "Ujjaini": [
+                "ujjaini", "ujjaini mahakali", "ujjaini mahankali", "mahakali secunderabad",
+                "secunderabad mahakali", "secunderabad mahankali", "sri ujjaini mahakali",
+                "sri ujjaini mahankali", "ujjaini mahakali temple", "ujjaini mahankali temple",
+                "sri ujjaini mahakali temple", "sri ujjaini mahankali temple", "ujjaini temple",
+                "ujjaini devasthanam"
+            ],
+            "Veera Satyanarayana": ["veera satyanarayana", "satyanarayana swamy", "annavaram", "annavarm", "veera venkata satyanarayana"],
             "Vemulavada": ["vemulavada", "vemulawada", "rajarajeshwara", "rajanna", "rajanne"],
             "Yadadri": ["yadadri", "yadagirigutta", "laxmi narasimha yadadri", "narasimha yadadri"]
         }
@@ -325,14 +331,7 @@ class ComparisonAgent(BaseAgent):
         if conflict_notes:
             lines.append("*(Note: The available records contain differing schedules/information. Please verify the current temple schedule before relying on them).*\n")
 
-        # Source attribution
-        if all_sources:
-            lines.append("**Sources:**")
-            for t in detected_temples:
-                t_srcs = sources_by_temple.get(t, [])
-                if t_srcs:
-                    lines.append(f"- **{t}**: {', '.join(t_srcs)}")
-
+        # Source attribution preserved internally in AgentResponse.sources
         comparison_answer = "\n".join(lines).strip()
 
         # Success determination: successful if at least one temple has verified data
@@ -383,11 +382,21 @@ class ComparisonAgent(BaseAgent):
 
     def _detect_conflicts(self, temple_data: Dict[str, Dict[str, Optional[str]]]) -> bool:
         """
-        Checks if any retrieved category evidence explicitly notes schedule variations or conflicts.
+        Checks if any retrieved category evidence explicitly notes schedule contradictions or conflicting sources.
+        Guards against triggering on ordinary operational disclaimers like 'subject to change' or 'seasonal variations'.
         """
-        conflict_keywords = ["differ", "conflicting", "varies", "subject to change", "seasonal variations"]
+        conflict_phrases = [
+            "conflicting records",
+            "differing sources",
+            "discrepancy in records",
+            "unverified discrepancy",
+            "conflicting schedules",
+            "differing schedule",
+            "sources conflict",
+            "unresolved discrepancy"
+        ]
         for t_cats in temple_data.values():
             for text in t_cats.values():
-                if text and any(k in text.lower() for k in conflict_keywords):
+                if text and any(p in text.lower() for p in conflict_phrases):
                     return True
         return False
